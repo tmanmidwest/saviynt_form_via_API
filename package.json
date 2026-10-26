@@ -1,0 +1,27 @@
+{
+  "name": "saviynt-request-form",
+  "version": "1.0.0",
+  "description": "Branded external-user request form backed by the Saviynt EIC API",
+  "main": "server.js",
+  "directories": {
+    "lib": "lib"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "mock": "MOCK_MODE=true node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tmanmidwest/saviynt_form_via_API.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/tmanmidwest/saviynt_form_via_API/issues"
+  },
+  "homepage": "https://github.com/tmanmidwest/saviynt_form_via_API#readme",
+  "dependencies": {
+    "dotenv": "^18.0.9",
+    "express": "^4.22.3"
+  }
+}

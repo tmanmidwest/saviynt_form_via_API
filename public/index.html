@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Connection Check</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; color: #1f2937; background: #fff; }
+    .status { padding: 10px 14px; border-radius: 6px; background: #f3f4f6; margin-bottom: 20px; }
+    .ok { background: #ecfdf5; color: #065f46; }
+    .err { background: #fef2f2; color: #991b1b; }
+    select { width: 100%; padding: 8px; font-size: 16px; }
+    #details { margin-top: 12px; color: #4b5563; }
+  </style>
+</head>
+<body>
+  <h1>Saviynt connection check</h1>
+  <p>This page confirms the backend can log in to Saviynt and load organizations. The request form replaces it in the next step.</p>
+  <div id="status" class="status">Checking connection…</div>
+  <label for="org">Organization</label>
+  <select id="org" disabled><option>Loading…</option></select>
+  <div id="details"></div>
+
+  <script>
+    const statusEl = document.getElementById('status');
+    const orgEl = document.getElementById('org');
+    const detailsEl = document.getElementById('details');
+    let orgs = [];
+
+    async function load() {
+      const health = await fetch('/api/health').then((r) => r.json());
+      if (!health.ok) {
+        statusEl.className = 'status err';
+        statusEl.textContent = `Login failed (${health.mode} mode): ${health.error}`;
+        return;
+      }
+      const res = await fetch('/api/organizations');
+      const data = await res.json();
+      if (!res.ok) {
+        statusEl.className = 'status err';
+        statusEl.textContent = `Logged in, but loading organizations failed: ${data.error}`;
+        return;
+      }
+      orgs = data.organizations;
+      statusEl.className = 'status ok';
+      statusEl.textContent = `Connected (${health.mode} mode). ${orgs.length} active organizations loaded.`;
+      orgEl.innerHTML = '<option value="">Choose an organization</option>' +
+        orgs.map((o, i) => `<option value="${i}">${o.name.replace(/</g, '&lt;')}</option>`).join('');
+      orgEl.disabled = false;
+    }
+
+    orgEl.addEventListener('change', () => {
+      const o = orgs[orgEl.value];
+      detailsEl.textContent = o ? [o.description, o.location, o.parent && `Parent: ${o.parent}`].filter(Boolean).join(' · ') : '';
+    });
+
+    load().catch((err) => {
+      statusEl.className = 'status err';
+      statusEl.textContent = `Could not reach the backend: ${err.message}`;
+    });
+  </script>
+</body>
+</html>
