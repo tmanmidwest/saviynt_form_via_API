@@ -7,6 +7,9 @@ const { clientFor, mockMode } = require('./lib/clients');
 const app = express();
 app.use(express.json());
 
+// Liveness probe for orchestrators/deployers. No auth, no secrets.
+app.get('/healthz', (req, res) => res.json({ ok: true }));
+
 // ---- Admin auth (HTTP Basic) ---------------------------------------------
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 let ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;

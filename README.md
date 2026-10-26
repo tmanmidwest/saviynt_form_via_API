@@ -61,6 +61,22 @@ or per form, if your workflow routes on something else.
 | Create user request | `POST {{url}}/ECM/{{path}}/createUserRequest` |
 | Request status | `POST {{url}}/ECM/{{path}}/fetchRequestHistory` |
 
+## Deploying with a Docker stack deployer (e.g. Cerebro)
+
+The repo is ready for a "deploy a compose stack from Git" workflow:
+
+- **Source:** Git repository, branch `main`, compose path `docker-compose.yml`
+  (repo root), with "build images from the repo" turned on (`build: .`).
+- **Private repo:** the deployer needs a stored Git credential with read
+  access to this repository, or the clone will fail.
+- **Environment:** set `ADMIN_USER`, `ADMIN_PASSWORD`, `MOCK_MODE`, and `PORT`
+  (host port) in the deployer's environment box; it writes them to a `.env`
+  beside the compose file. See `.env.example` for the keys.
+- **Persistence:** config lives on the named volume `forms-data`, so the
+  Saviynt connection and forms you set in the UI survive redeploys and
+  force-recreate.
+- **Health:** the container exposes `GET /healthz` and a Docker `HEALTHCHECK`.
+
 ## Running a demo
 
 See [RUNBOOK.md](RUNBOOK.md).

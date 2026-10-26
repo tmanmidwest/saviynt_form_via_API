@@ -2,7 +2,9 @@ services:
   forms:
     build: .
     ports:
-      - "3000:3000"
+      # Host port is configurable to avoid clashes with other containers; the
+      # app always listens on 3000 inside the container.
+      - "${PORT:-3000}:3000"
     environment:
       # Admin console login (change these).
       ADMIN_USER: ${ADMIN_USER:-admin}
@@ -10,6 +12,10 @@ services:
       # Set MOCK_MODE=true to run without a Saviynt tenant.
       MOCK_MODE: ${MOCK_MODE:-false}
     volumes:
-      # Persists the Saviynt connection and all forms across restarts.
-      - ./data:/data
+      # Named volume so the Saviynt connection and forms set in the admin UI
+      # survive redeploys and "Force recreate".
+      - forms-data:/data
     restart: unless-stopped
+
+volumes:
+  forms-data:
