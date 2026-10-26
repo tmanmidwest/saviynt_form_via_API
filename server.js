@@ -94,6 +94,31 @@ function normalizeUser(u) {
   return { username, name, email: u.email || '', title: u.title || '', customer: u.customer || '', statuskey: String(u.statuskey ?? '') };
 }
 
+// Final shaping shared by the real submit and the admin API preview: username
+// fallback, the org attribute, roles and requestor. Keeping both on one function
+// means the preview can't drift from what's actually sent.
+function finalizeUserPayload(user, { form, orgField, conn, organization }) {
+  if (!user.username && user.firstname && user.lastname) {
+    user.username = `${user.firstname}.${user.lastname}`.toLowerCase().replace(/[^a-z0-9.]/g, '');
+  }
+  user[orgField] = organization;
+  if (form.roles) user.Roles = form.roles;
+  if (conn.requestor) user.requestor = conn.requestor;
+  return user;
+}
+
+// A representative sample value for a field, used only by the API-call preview.
+function sampleValue(field) {
+  if (field.type === 'email') return 'jane.doe@example.com';
+  if (field.type === 'tel') return '+1-555-0100';
+  if (field.type === 'number') return '123';
+  if (field.type === 'userLookup') return `<${(field.label || field.key).toLowerCase()} username>`;
+  if (field.key === 'firstname') return 'Jane';
+  if (field.key === 'lastname') return 'Doe';
+  if (field.key === 'username') return 'jane.doe';
+  return `<${(field.label || field.key).toLowerCase()}>`;
+}
+
 // ---- Admin API ------------------------------------------------------------
 app.get('/api/admin/connection', requireAdmin, (req, res) => {
   const c = store.getConnection();
@@ -172,6 +197,53 @@ app.delete('/api/admin/forms/:id', requireAdmin, (req, res) => {
   const ok = store.deleteForm(req.params.id);
   log.info('admin.form_deleted', { reqId: req.reqId, formId: req.params.id, ok });
   res.json({ ok });
+});
+
+// Preview the exact Saviynt call this form generates, with sample values, so it
+// can be compared against Postman / shared with peers when troubleshooting.
+// Nothing is sent to Saviynt. Built from finalizeUserPayload so it matches the
+// real submit field-for-field.
+app.get('/api/admin/forms/:id/preview', requireAdmin, (req, res) => {
+  const form = store.getForm(req.params.id);
+  if (!form) return res.status(404).json({ error: 'Form not found.' });
+  const { conn, orgField } = settingsFor(form);
+  const mode = form.submitMode === 'direct' ? 'direct' : 'request';
+
+  // Sample values derived from the form's own fields.
+  const user = {};
+  for (const field of form.fields || []) {
+    const v = sampleValue(field);
+    if (v) user[field.key] = v;
+  }
+  finalizeUserPayload(user, { form, orgField, conn, organization: '<selected organization>' });
+
+  const base = (conn.url || '{{url}}').replace(/\/+$/, '');
+  const apiPath = (conn.apiPath || 'api/v5').replace(/^\/+|\/+$/g, '');
+  const endpoint = mode === 'direct' ? 'createUser' : 'createUserRequest';
+  const url = `${base}/ECM/${apiPath}/${endpoint}`;
+  const contentType = mode === 'direct' ? 'application/json' : 'multipart/form-data';
+
+  // cURL, with the bearer token masked.
+  const curlLines = [`curl -X POST '${url}' \\`, `  -H 'Authorization: Bearer <access_token>' \\`];
+  let postman;
+  if (mode === 'direct') {
+    curlLines.push(`  -H 'Content-Type: application/json' \\`);
+    curlLines.push(`  -d '${JSON.stringify(user, null, 2)}'`);
+    postman = JSON.stringify(user, null, 2); // raw JSON body
+  } else {
+    for (const [k, v] of Object.entries(user)) curlLines.push(`  -F '${k}=${v}' \\`);
+    curlLines[curlLines.length - 1] = curlLines[curlLines.length - 1].replace(/ \\$/, '');
+    // Postman form-data bulk-edit format: one key:value per line.
+    postman = Object.entries(user).map(([k, v]) => `${k}:${v}`).join('\n');
+  }
+
+  res.json({
+    mode, method: 'POST', endpoint, url, contentType, body: user,
+    curl: curlLines.join('\n'),
+    postman,
+    auth: 'Service-account bearer token from POST /ECM/api/login (refreshed via POST /ECM/oauth/access_token).',
+    note: "Values are samples generated from this form's fields; a real submit uses what the requester enters. Save the form first to reflect unsaved edits. No request is sent by this preview.",
+  });
 });
 
 // Serve the admin console behind the same basic auth.
@@ -301,13 +373,8 @@ app.post('/api/forms/:id/request', async (req, res) => {
     }
   }
 
-  if (!user.username && user.firstname && user.lastname) {
-    user.username = `${user.firstname}.${user.lastname}`.toLowerCase().replace(/[^a-z0-9.]/g, '');
-  }
-  // Native Saviynt organization attribute (usually "customer").
-  user[orgField] = organization;
-  if (form.roles) user.Roles = form.roles;
-  if (conn.requestor) user.requestor = conn.requestor;
+  // Shape the final payload (username fallback, org attribute, roles, requestor).
+  finalizeUserPayload(user, { form, orgField, conn, organization });
 
   log.info('form.submit', { reqId: req.reqId, formId: form.id, organization, username: user.username, manager: user.manager || null });
   try {

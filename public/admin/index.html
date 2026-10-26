@@ -39,6 +39,7 @@
     .swatch { display: inline-block; width: 16px; height: 16px; border-radius: 3px; border: 1px solid #cbd5e1; vertical-align: middle; margin-right: 4px; }
     .hidden { display: none; }
     .muted { color: #64748b; }
+    pre.preview { background: #0f172a; color: #e2e8f0; padding: 14px 16px; border-radius: 8px; font-size: 12.5px; line-height: 1.55; overflow-x: auto; white-space: pre; margin-top: 10px; }
     a { color: #2563eb; }
   </style>
 </head>
@@ -113,6 +114,14 @@
       <label>Scope manager/user lookups to selected organization</label>
       <select id="e-scopeManagerToOrg"><option value="false">No</option><option value="true">Yes</option></select>
       <label>Roles to assign <span class="help">(optional, #### separated role names)</span></label><input id="e-roles">
+
+      <label style="margin-top:18px">API call preview <span class="help">(the exact Saviynt call this form makes, with sample values — save the form first to include recent edits)</span></label>
+      <div class="toolbar" style="margin-top:0">
+        <button class="small" id="e-preview">Show API call</button>
+        <button class="small hidden" id="e-preview-curl">Copy as cURL</button>
+        <button class="small hidden" id="e-preview-postman">Copy Postman body</button>
+      </div>
+      <pre id="e-preview-out" class="preview hidden"></pre>
 
       <div class="toolbar">
         <button class="primary" id="e-save">Save form</button>

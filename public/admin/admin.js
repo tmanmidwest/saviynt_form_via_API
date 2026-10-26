@@ -120,6 +120,11 @@ async function openEditor(id) {
   colorInputs(editing.colors || {});
   $('fields').innerHTML = '';
   (editing.fields || []).forEach((f) => $('fields').appendChild(fieldRow(f)));
+  // Reset the API-call preview for the newly opened form.
+  $('e-preview-out').classList.add('hidden');
+  $('e-preview-out').textContent = '';
+  $('e-preview-curl').classList.add('hidden');
+  $('e-preview-postman').classList.add('hidden');
   $('editor').scrollIntoView({ behavior: 'smooth' });
 }
 $('add-field').addEventListener('click', () => $('fields').appendChild(fieldRow()));
@@ -156,6 +161,30 @@ $('e-delete').addEventListener('click', async () => {
     await loadForms();
   } catch (e) { msg($('e-msg'), e.message, 'err'); }
 });
+
+// ---- API call preview ----
+let previewData = null;
+async function copyText(text, okMsg) {
+  try { await navigator.clipboard.writeText(text); msg($('e-msg'), okMsg, 'ok'); }
+  catch { msg($('e-msg'), 'Copy failed — select the text and copy manually.', 'err'); }
+}
+$('e-preview').addEventListener('click', async () => {
+  if (!editing) return;
+  try {
+    const p = await api('GET', `/api/admin/forms/${encodeURIComponent(editing.id)}/preview`);
+    previewData = p;
+    $('e-preview-out').textContent =
+      `# ${p.method} ${p.endpoint}  (${p.mode} mode · ${p.contentType})\n` +
+      `# URL:  ${p.url}\n` +
+      `# Auth: ${p.auth}\n\n` +
+      `${p.curl}\n\n# ${p.note}`;
+    $('e-preview-out').classList.remove('hidden');
+    $('e-preview-curl').classList.remove('hidden');
+    $('e-preview-postman').classList.remove('hidden');
+  } catch (e) { msg($('e-msg'), e.message, 'err'); }
+});
+$('e-preview-curl').addEventListener('click', () => previewData && copyText(previewData.curl, 'cURL copied.'));
+$('e-preview-postman').addEventListener('click', () => previewData && copyText(previewData.postman, 'Postman body copied.'));
 
 // ---- Admin password ----
 $('p-save').addEventListener('click', async () => {
