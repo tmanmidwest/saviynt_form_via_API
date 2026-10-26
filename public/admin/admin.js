@@ -201,19 +201,131 @@ $('p-save').addEventListener('click', async () => {
 });
 
 // ---- Recent activity ----
+// Events share a reqId per user action, so we group them into one collapsible
+// row (with a colour-coded status) instead of a flat, overflowing list.
 let logTimer = null;
+let lastEvents = [];
+let logFilter = 'all';
+const expanded = new Set();        // reqIds the user has opened
+const LVL = { error: 0, warn: 1, info: 2, debug: 3 };
+
+function fmtVal(v, max = 80) {
+  const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
+  return s.length > max ? s.slice(0, max) + '…' : s;
+}
+
+function groupStatus(events) {
+  const err = events.some((e) => e.level === 'error'
+    || (e.event === 'saviynt.call' && (Number(e.status) >= 400 || (e.errorCode !== undefined && String(e.errorCode) !== '0'))));
+  if (err) return 'err';
+  if (events.some((e) => e.level === 'warn')) return 'warn';
+  const ok = events.some((e) => e.event === 'form.submit_ok'
+    || (e.event === 'users.lookup' && Number(e.matched) > 0));
+  return ok ? 'ok' : 'info';
+}
+
+function summarize(events) {
+  const by = (name) => events.find((e) => e.event === name);
+  const status = groupStatus(events);
+  const sub = by('form.submit');
+  const subFail = by('form.submit_failed');
+  const subOk = by('form.submit_ok');
+  const lookup = by('users.lookup') || by('users.lookup_failed');
+
+  if (sub || subFail || subOk) {
+    const who = sub ? `${sub.username || '—'}${sub.organization ? ' → ' + sub.organization : ''}` : '';
+    if (subFail) return { status, kind: 'submit', title: 'Submission failed', meta: [who, subFail.error].filter(Boolean).join(' · ') };
+    if (subOk) return { status, kind: 'submit', title: 'Submission sent', meta: [who, subOk.requestId ? 'request ' + subOk.requestId : ''].filter(Boolean).join(' · ') };
+    return { status, kind: 'submit', title: 'Submission', meta: who };
+  }
+  if (lookup) {
+    const q = lookup.q ? `"${lookup.q}"` : '';
+    const m = lookup.event === 'users.lookup_failed' ? 'failed'
+      : (lookup.matched !== undefined ? `${lookup.matched} ${Number(lookup.matched) === 1 ? 'match' : 'matches'}` : '');
+    return { status, kind: 'lookup', title: 'Manager lookup', meta: [q, m].filter(Boolean).join(' · ') };
+  }
+  // admin / startup / other: summarise the first non-Saviynt event.
+  const head = events.find((e) => !e.event.startsWith('saviynt.')) || events[0];
+  const { ts, level, event, reqId, ...rest } = head;
+  return {
+    status, kind: event.startsWith('admin.') ? 'admin' : 'other', title: event,
+    meta: Object.entries(rest).map(([k, v]) => `${k}=${fmtVal(v)}`).join(' · '),
+  };
+}
+
+function stepHtml(e) {
+  const { ts, level, event, reqId, body, ...rest } = e;
+  const t = new Date(ts).toLocaleTimeString();
+  const kv = Object.entries(rest).map(([k, v]) => `${esc(k)}=${esc(fmtVal(v, 140))}`).join('  ');
+  let bodyHtml = '';
+  if (body !== undefined) {
+    const pretty = JSON.stringify(body, null, 2);
+    bodyHtml = `<div class="json-box"><button class="small copy" data-copy="${esc(pretty)}">Copy</button>${esc(pretty)}</div>`;
+  }
+  return `<div class="log-step"><span class="lv ${esc(level)}">${esc(level)}</span><span class="muted">${esc(t)}</span> <code>${esc(event)}</code> <span class="muted">${kv}</span>${bodyHtml}</div>`;
+}
+
+function renderLogs() {
+  const groups = new Map();
+  for (const e of lastEvents) {
+    const key = e.reqId || `_${e.ts}_${e.event}`; // events without a reqId each stand alone
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(e);
+  }
+  const list = [...groups.entries()]
+    .map(([key, evs]) => ({ key, evs, newest: evs[0].ts, ...summarize(evs) }))
+    .sort((a, b) => (a.newest < b.newest ? 1 : -1))
+    .filter((g) => logFilter === 'all'
+      || (logFilter === 'problems' && (g.status === 'err' || g.status === 'warn'))
+      || (logFilter === 'submits' && g.kind === 'submit')
+      || (logFilter === 'lookups' && g.kind === 'lookup'));
+
+  if (!list.length) return '<p class="muted" style="padding:6px 2px">No matching events.</p>';
+  return list.map((g) => {
+    const open = expanded.has(g.key);
+    const t = new Date(g.newest).toLocaleTimeString();
+    const steps = open ? `<div class="log-steps">${[...g.evs].reverse().map(stepHtml).join('')}</div>` : '';
+    return `<div class="log-group">
+      <div class="log-sum" data-toggle="${esc(g.key)}">
+        <span class="dot ${g.status}"></span>
+        <span class="time">${esc(t)}</span>
+        <span class="title">${esc(g.title)}</span>
+        <span class="meta">${esc(g.meta)}</span>
+        <span class="caret">${open ? '▾' : '▸'}</span>
+      </div>${steps}</div>`;
+  }).join('');
+}
+
 async function loadLogs() {
+  const box = $('log-list');
+  const prevScroll = box.scrollTop;
   try {
     const { level, events } = await api('GET', '/api/admin/logs?limit=200');
     $('log-level').textContent = level;
-    $('log-list').innerHTML = events.length ? events.map((e) => {
-      const { ts, level: lvl, event, reqId, ...rest } = e;
-      const t = new Date(ts).toLocaleTimeString();
-      const detail = Object.entries(rest).map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' ');
-      return `<tr><td class="muted" style="white-space:nowrap">${esc(t)}</td><td><strong>${esc(event)}</strong> <span class="muted">${esc(detail)}</span></td></tr>`;
-    }).join('') : '<tr><td class="muted">No events yet.</td></tr>';
-  } catch (e) { $('log-list').innerHTML = `<tr><td class="muted">Could not load logs: ${esc(e.message)}</td></tr>`; }
+    lastEvents = events;
+    box.innerHTML = renderLogs();
+    box.scrollTop = prevScroll;
+  } catch (e) { box.innerHTML = `<p class="muted">Could not load logs: ${esc(e.message)}</p>`; }
 }
+
+async function copyLog(text, btn) {
+  const orig = btn.textContent;
+  try { await navigator.clipboard.writeText(text); btn.textContent = 'Copied'; }
+  catch { btn.textContent = 'Copy failed'; }
+  setTimeout(() => { btn.textContent = orig; }, 1200);
+}
+
+$('log-list').addEventListener('click', (ev) => {
+  const copy = ev.target.closest('[data-copy]');
+  if (copy) { ev.stopPropagation(); copyLog(copy.getAttribute('data-copy'), copy); return; }
+  const sum = ev.target.closest('[data-toggle]');
+  if (!sum) return;
+  const key = sum.getAttribute('data-toggle');
+  if (expanded.has(key)) expanded.delete(key); else expanded.add(key);
+  const box = $('log-list'); const s = box.scrollTop;
+  box.innerHTML = renderLogs(); box.scrollTop = s;
+});
+$('log-filter').addEventListener('change', (e) => { logFilter = e.target.value; $('log-list').innerHTML = renderLogs(); });
 $('log-refresh').addEventListener('click', loadLogs);
 $('log-auto').addEventListener('change', (e) => { clearInterval(logTimer); if (e.target.checked) logTimer = setInterval(loadLogs, 5000); });
 
