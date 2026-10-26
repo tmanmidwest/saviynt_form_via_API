@@ -85,9 +85,17 @@ function publicForm(form) {
   return rest;
 }
 
+// A saved userSearchQuery equal to the old default is treated as blank, so
+// volumes written by earlier builds don't override the multi-field search.
+const LEGACY_QUERY = 'username:{q}*';
+function effectiveSearchQuery(conn) {
+  const q = (conn.userSearchQuery || '').trim();
+  return q && q !== LEGACY_QUERY ? q : '';
+}
+
 // Build the Saviynt user-search query from the connection template.
 function userQuery(conn, text, org) {
-  const tpl = conn.userSearchQuery || 'username:{q}*';
+  const tpl = effectiveSearchQuery(conn) || 'username:{q}*';
   return tpl.replace(/\{q\}/g, text || '*').replace(/\{org\}/g, org || '');
 }
 
@@ -104,8 +112,9 @@ function normalizeUser(u) {
 // ---- Admin API ------------------------------------------------------------
 app.get('/api/admin/connection', requireAdmin, (req, res) => {
   const c = store.getConnection();
-  // Never echo the stored password back; just whether one is set.
-  res.json({ ...c, password: '', hasPassword: Boolean(c.password) });
+  // Never echo the stored password back; just whether one is set. Blank out a
+  // legacy userSearchQuery so the UI shows it as empty (multi-field search).
+  res.json({ ...c, userSearchQuery: effectiveSearchQuery(c), password: '', hasPassword: Boolean(c.password) });
 });
 
 app.put('/api/admin/connection', requireAdmin, (req, res) => {
@@ -228,7 +237,7 @@ app.get('/api/forms/:id/users', async (req, res) => {
   // otherwise search each configured field (merged), so typing a name works
   // even when usernames don't look like names.
   let queries;
-  if (conn.userSearchQuery) {
+  if (effectiveSearchQuery(conn)) {
     queries = [userQuery(conn, text, scoped ? org : '')];
   } else if (text.length >= 2) {
     const fields = (conn.userSearchFields || 'username,firstname,lastname,email').split(',').map((s) => s.trim()).filter(Boolean);
