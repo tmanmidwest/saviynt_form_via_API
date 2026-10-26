@@ -18,6 +18,26 @@ npm start              # http://localhost:3000
 To try it without a tenant, run `npm run mock`, which serves sample
 organizations instead of calling Saviynt.
 
+## How the form works
+
+1. **Organization** — a live dropdown of active Saviynt organizations.
+2. **User details** — fields driven by the brand config (first/last name,
+   email, manager by default).
+3. **Review & submit** — opens a `createUserRequest`, which enters the
+   tenant's approval workflow. The returned request ID is shown.
+
+The chosen organization is written to the Saviynt attribute named by
+`SAVIYNT_ORG_FIELD` (default `customproperty1`). Set that to whatever
+attribute your approval workflow actually keys on so the request routes to
+the right org/manager approver.
+
+## Branding
+
+Each brand is a JSON file in `brands/`. Copy `brands/default.json` (or
+`brands/acme.example.json`) to `brands/<yourbrand>.json`, edit the logo URL,
+colors, wording and fields, then run with `BRAND=<yourbrand>`. Edits show up
+on page refresh without a restart.
+
 ## Saviynt APIs used
 
 These match the Saviynt EIC v24.2 Postman collection. `{{url}}` is
@@ -28,6 +48,7 @@ These match the Saviynt EIC v24.2 Postman collection. `{{url}}` is
 | Log in | `POST {{url}}/ECM/api/login` |
 | Refresh token | `POST {{url}}/ECM/oauth/access_token` |
 | List organizations | `POST {{url}}/ECM/{{path}}/getOrganization` |
+| Create user request | `POST {{url}}/ECM/{{path}}/createUserRequest` |
 
 The service account needs permission to call these APIs (for example
 `ROLE_ADMIN` in a demo tenant). Set `SAVIYNT_ORG_QUERY` to limit which

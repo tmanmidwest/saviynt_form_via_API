@@ -1,4 +1,5 @@
 require('dotenv').config();
+const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const { SaviyntClient } = require('./lib/saviynt');
@@ -14,9 +15,28 @@ const saviynt = mockMode
       password: process.env.SAVIYNT_PASSWORD,
     });
 
+// Which brand file under brands/ to serve. BRAND=acme.example loads
+// brands/acme.example.json; default is brands/default.json.
+function loadBrand() {
+  const name = process.env.BRAND || 'default';
+  const file = path.join(__dirname, 'brands', `${name}.json`);
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (err) {
+    console.error(`Could not load brand "${name}" (${err.message}); using built-in default.`);
+    return JSON.parse(fs.readFileSync(path.join(__dirname, 'brands', 'default.json'), 'utf8'));
+  }
+}
+
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Branding and field config for the current brand. Re-read each request so
+// edits show up on refresh without a restart.
+app.get('/api/brand', (req, res) => {
+  res.json(loadBrand());
+});
 
 // Confirms the service account can log in to Saviynt.
 app.get('/api/health', async (req, res) => {
@@ -47,6 +67,45 @@ app.get('/api/organizations', async (req, res) => {
   } catch (err) {
     console.error('getOrganization failed:', err.message, err.saviynt || '');
     res.status(502).json({ error: err.message });
+  }
+});
+
+// Submits a create-user request. The backend decides which fields are allowed
+// from the brand config, so the browser can't inject arbitrary Saviynt params.
+app.post('/api/request', async (req, res) => {
+  const brand = loadBrand();
+  const body = req.body || {};
+
+  const organization = String(body.organization || '').trim();
+  if (!organization) return res.status(400).json({ error: 'Please choose an organization.' });
+
+  const user = {};
+  for (const [key, cfg] of Object.entries(brand.fields || {})) {
+    const value = String(body[key] ?? '').trim();
+    if (cfg.required && !value) return res.status(400).json({ error: `${cfg.label} is required.` });
+    if (value) user[key] = value;
+  }
+
+  // Derive a username if the form didn't collect one.
+  if (!user.username && user.firstname && user.lastname) {
+    user.username = `${user.firstname}.${user.lastname}`.toLowerCase().replace(/[^a-z0-9.]/g, '');
+  }
+  // Record the chosen organization. customproperty1 is a common place to stash
+  // it; adjust to whatever attribute your workflow reads.
+  user[process.env.SAVIYNT_ORG_FIELD || 'customproperty1'] = organization;
+  if (process.env.SAVIYNT_REQUESTOR) user.requestor = process.env.SAVIYNT_REQUESTOR;
+
+  try {
+    const result = await saviynt.createUserRequest(user);
+    res.json({
+      ok: true,
+      requestId: result.requestid || result.requestId || null,
+      message: result.msg || 'Request submitted.',
+      raw: result,
+    });
+  } catch (err) {
+    console.error('createUserRequest failed:', err.message, err.saviynt || '');
+    res.status(502).json({ error: err.message, raw: err.saviynt || null });
   }
 });
 
