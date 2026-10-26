@@ -263,6 +263,9 @@ app.get('/api/forms/:id/users', async (req, res) => {
     .filter((u) => !needle || [u.name, u.username, u.email, u.title].some((v) => v.toLowerCase().includes(needle)))
     .filter((u) => !scoped || !u.customer || u.customer === org)
     .slice(0, 10);
+  // Diagnostic: raw = users Saviynt returned across queries, matched = after
+  // filtering. raw>0 & matched=0 => parse/filter; raw=0 => query returned none.
+  log.info('users.lookup', { reqId: req.reqId, formId: form.id, q: text, queries: queries.length, raw: merged.length, matched: users.length });
   res.json({ users });
 });
 
