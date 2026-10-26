@@ -32,6 +32,7 @@ async function loadConnection() {
   $('c-requestor').value = c.requestor || '';
   $('c-orgField').value = c.orgField || 'customer';
   $('c-orgQuery').value = c.orgQuery || '';
+  $('c-userSearchFields').value = c.userSearchFields || '';
   $('c-userSearchQuery').value = c.userSearchQuery || '';
 }
 $('c-save').addEventListener('click', async () => {
@@ -39,7 +40,7 @@ $('c-save').addEventListener('click', async () => {
     const body = {
       url: $('c-url').value, apiPath: $('c-apiPath').value, username: $('c-username').value,
       requestor: $('c-requestor').value, orgField: $('c-orgField').value, orgQuery: $('c-orgQuery').value,
-      userSearchQuery: $('c-userSearchQuery').value,
+      userSearchFields: $('c-userSearchFields').value, userSearchQuery: $('c-userSearchQuery').value,
     };
     if ($('c-password').value) body.password = $('c-password').value;
     await api('PUT', '/api/admin/connection', body);
@@ -155,6 +156,20 @@ $('e-delete').addEventListener('click', async () => {
     $('editor').classList.add('hidden'); editing = null;
     await loadForms();
   } catch (e) { msg($('e-msg'), e.message, 'err'); }
+});
+
+// ---- Admin password ----
+$('p-save').addEventListener('click', async () => {
+  const current = $('p-current').value;
+  const next = $('p-new').value;
+  const confirmPw = $('p-confirm').value;
+  if (next.length < 8) return msg($('p-msg'), 'New password must be at least 8 characters.', 'err');
+  if (next !== confirmPw) return msg($('p-msg'), 'New passwords do not match.', 'err');
+  try {
+    await api('POST', '/api/admin/password', { current, next });
+    $('p-current').value = $('p-new').value = $('p-confirm').value = '';
+    msg($('p-msg'), 'Password changed. Use the new password next time you log in.', 'ok');
+  } catch (e) { msg($('p-msg'), e.message, 'err'); }
 });
 
 // ---- Recent activity ----

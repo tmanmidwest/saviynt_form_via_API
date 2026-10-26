@@ -26,12 +26,43 @@ if (!ADMIN_PASSWORD) {
   console.warn('WARNING: ADMIN_PASSWORD is not set; using "admin". Set it in your .env for anything but local testing.');
 }
 
+// Password hashing for the admin login (scrypt). Format: scrypt$<salt>$<hash>.
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `scrypt$${salt}$${hash}`;
+}
+function verifyHash(password, stored) {
+  const [scheme, salt, hash] = String(stored).split('$');
+  if (scheme !== 'scrypt' || !salt || !hash) return false;
+  const expected = Buffer.from(hash, 'hex');
+  const actual = crypto.scryptSync(password, salt, expected.length);
+  return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+}
+// Constant-time string compare for the env-password fallback.
+function safeEqual(a, b) {
+  const ab = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+  return ab.length === bb.length && crypto.timingSafeEqual(ab, bb);
+}
+
+// A stored (UI-set) password overrides the env var; the env var is the initial
+// password and the fallback until one is set.
+function checkAdminPassword(pass) {
+  const stored = store.getAdminHash();
+  if (stored) return verifyHash(pass, stored);
+  return safeEqual(pass, ADMIN_PASSWORD);
+}
+
 function requireAdmin(req, res, next) {
   const header = req.headers.authorization || '';
   const [scheme, encoded] = header.split(' ');
   if (scheme === 'Basic' && encoded) {
-    const [user, pass] = Buffer.from(encoded, 'base64').toString().split(':');
-    if (user === ADMIN_USER && pass === ADMIN_PASSWORD) return next();
+    const idx = Buffer.from(encoded, 'base64').toString().indexOf(':');
+    const decoded = Buffer.from(encoded, 'base64').toString();
+    const user = decoded.slice(0, idx);
+    const pass = decoded.slice(idx + 1);
+    if (safeEqual(user, ADMIN_USER) && checkAdminPassword(pass)) return next();
     log.warn('admin.auth_failed', { reqId: req.reqId, user, ip: req.ip });
   }
   res.set('WWW-Authenticate', 'Basic realm="Saviynt Forms Admin"');
@@ -80,7 +111,7 @@ app.get('/api/admin/connection', requireAdmin, (req, res) => {
 app.put('/api/admin/connection', requireAdmin, (req, res) => {
   const b = req.body || {};
   const patch = {};
-  for (const k of ['url', 'apiPath', 'username', 'requestor', 'orgField', 'orgQuery', 'userSearchQuery']) {
+  for (const k of ['url', 'apiPath', 'username', 'requestor', 'orgField', 'orgQuery', 'userSearchFields', 'userSearchQuery']) {
     if (b[k] !== undefined) patch[k] = String(b[k]).trim();
   }
   // Only overwrite the password when a new one is provided.
@@ -105,6 +136,20 @@ app.post('/api/admin/connection/test', requireAdmin, async (req, res) => {
 // Recent events for the admin "Recent activity" view.
 app.get('/api/admin/logs', requireAdmin, (req, res) => {
   res.json({ level: log.LEVEL_NAME, events: log.recent(Number(req.query.limit) || 200) });
+});
+
+// Change the admin console login password (stored hashed on the volume).
+app.post('/api/admin/password', requireAdmin, (req, res) => {
+  const current = String((req.body || {}).current || '');
+  const next = String((req.body || {}).next || '');
+  if (!checkAdminPassword(current)) {
+    log.warn('admin.password_change_failed', { reqId: req.reqId, reason: 'wrong current password' });
+    return res.status(400).json({ error: 'Current password is incorrect.' });
+  }
+  if (next.length < 8) return res.status(400).json({ error: 'New password must be at least 8 characters.' });
+  store.setAdminHash(hashPassword(next));
+  log.info('admin.password_changed', { reqId: req.reqId });
+  res.json({ ok: true });
 });
 
 app.get('/api/admin/forms', requireAdmin, (req, res) => res.json({ forms: store.listForms() }));
@@ -174,25 +219,51 @@ app.get('/api/forms/:id/users', async (req, res) => {
   if (!form || !form.enabled) return res.status(404).json({ error: 'Form not found.' });
   const text = String(req.query.q || '').trim();
   const org = String(req.query.org || '').trim();
-  if (text.length < 2 && !(form.scopeManagerToOrg && org)) return res.json({ users: [] });
+  const scoped = Boolean(form.scopeManagerToOrg && org);
+  if (text.length < 2 && !scoped) return res.json({ users: [] });
   const { conn } = settingsFor(form);
-  try {
-    const query = userQuery(conn, text, form.scopeManagerToOrg ? org : '');
-    const raw = await clientFor(conn).searchUsers(query, { max: 50, reqId: req.reqId });
-    const needle = text.toLowerCase();
-    const users = raw
-      .map(normalizeUser)
-      .filter((u) => u.username)
-      // Refine by typed text across the visible fields.
-      .filter((u) => !needle || [u.name, u.username, u.email, u.title].some((v) => v.toLowerCase().includes(needle)))
-      // If scoped to an org, keep only that org's members (mock tags this).
-      .filter((u) => !(form.scopeManagerToOrg && org) || !u.customer || u.customer === org)
-      .slice(0, 10);
-    res.json({ users });
-  } catch (err) {
-    log.warn('users.lookup_failed', { reqId: req.reqId, formId: form.id, error: err.message });
-    res.status(502).json({ error: err.message });
+  const client = clientFor(conn);
+
+  // Build one or more Saviynt queries. If an advanced template is set, use it;
+  // otherwise search each configured field (merged), so typing a name works
+  // even when usernames don't look like names.
+  let queries;
+  if (conn.userSearchQuery) {
+    queries = [userQuery(conn, text, scoped ? org : '')];
+  } else if (text.length >= 2) {
+    const fields = (conn.userSearchFields || 'username,firstname,lastname,email').split(',').map((s) => s.trim()).filter(Boolean);
+    queries = fields.map((f) => `${f}:${text}*`);
+  } else {
+    // Scoped browse with no text: list the org's members.
+    queries = [`customer:${org}`];
   }
+
+  const seen = new Set();
+  const merged = [];
+  let lastErr = null;
+  for (const q of queries) {
+    try {
+      const raw = await client.searchUsers(q, { max: 20, reqId: req.reqId });
+      for (const u of raw.map(normalizeUser)) {
+        const key = u.username.toLowerCase();
+        if (u.username && !seen.has(key)) { seen.add(key); merged.push(u); }
+      }
+    } catch (err) {
+      lastErr = err; // a single field query may be rejected; keep the others.
+    }
+  }
+  // Only surface an error if every query failed (so the UI can say so).
+  if (!merged.length && lastErr) {
+    log.warn('users.lookup_failed', { reqId: req.reqId, formId: form.id, error: lastErr.message });
+    return res.status(502).json({ error: lastErr.message });
+  }
+
+  const needle = text.toLowerCase();
+  const users = merged
+    .filter((u) => !needle || [u.name, u.username, u.email, u.title].some((v) => v.toLowerCase().includes(needle)))
+    .filter((u) => !scoped || !u.customer || u.customer === org)
+    .slice(0, 10);
+  res.json({ users });
 });
 
 app.post('/api/forms/:id/request', async (req, res) => {
@@ -220,7 +291,8 @@ app.post('/api/forms/:id/request', async (req, res) => {
   for (const field of lookupFields) {
     const username = user[field.key];
     try {
-      const raw = await clientFor(conn).searchUsers(userQuery(conn, username, form.scopeManagerToOrg ? organization : ''), { max: 50, reqId: req.reqId });
+      // Validate by exact username regardless of the display search config.
+      const raw = await clientFor(conn).searchUsers(`username:${username}`, { max: 10, reqId: req.reqId });
       const match = raw.map(normalizeUser).find((u) => u.username.toLowerCase() === username.toLowerCase());
       const inOrg = !form.scopeManagerToOrg || !match?.customer || match.customer === organization;
       if (!match || !inOrg) {
@@ -280,6 +352,12 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/f/:id', (req, res) => res.sendFile(path.join(__dirname, 'public', 'form.html')));
 
 store.initIfMissing();
+// Recovery: ADMIN_PASSWORD_RESET=true clears the stored password so the env
+// ADMIN_PASSWORD works again (use when locked out, then unset it).
+if (process.env.ADMIN_PASSWORD_RESET === 'true' && store.getAdminHash()) {
+  store.setAdminHash('');
+  log.warn('admin.password_reset', { reason: 'ADMIN_PASSWORD_RESET env flag' });
+}
 const port = Number(process.env.PORT) || 3000;
 app.listen(port, async () => {
   const conn = store.getConnection();

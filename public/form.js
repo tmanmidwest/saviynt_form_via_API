@@ -58,18 +58,22 @@ function wireLookup(f) {
   let timer = null;
 
   function close() { results.style.display = 'none'; results.innerHTML = ''; }
+  function note(text) { results.innerHTML = `<div class="result note">${esc(text)}</div>`; results.style.display = 'block'; }
 
   async function search() {
     const q = input.value.trim();
     // Selecting then editing clears the stored choice.
     if (data[f.key] && q !== displays[f.key]) { delete data[f.key]; delete displays[f.key]; }
+    if (q.length < 2) { close(); return; }
+    note('Searching…');
     const params = new URLSearchParams({ q });
     if (data.organization) params.set('org', data.organization);
     try {
       const res = await fetch(`/api/forms/${encodeURIComponent(FORM_ID)}/users?${params.toString()}`);
       const body = await res.json();
-      const users = (body.users || []);
-      if (!users.length) { close(); return; }
+      if (!res.ok) { note(`Lookup failed: ${body.error || res.status}`); return; }
+      const users = body.users || [];
+      if (!users.length) { note('No matching users found.'); return; }
       results.innerHTML = users.map((u, i) => {
         const sub = [u.title, u.email].filter(Boolean).join(' · ');
         return `<div class="result" data-i="${i}"><strong>${esc(u.name)}</strong>${sub ? `<br><span class="sub">${esc(sub)}</span>` : ''}</div>`;
@@ -82,7 +86,7 @@ function wireLookup(f) {
         input.value = displays[f.key];
         close();
       }));
-    } catch { close(); }
+    } catch (err) { note(`Lookup failed: ${err.message}`); }
   }
 
   input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(search, 250); });
