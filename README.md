@@ -77,6 +77,28 @@ The repo is ready for a "deploy a compose stack from Git" workflow:
   force-recreate.
 - **Health:** the container exposes `GET /healthz` and a Docker `HEALTHCHECK`.
 
+## Logging
+
+Every event is written as one JSON line to stdout (so `docker compose logs`
+and Cerebro's log view show them): each Saviynt call with timing and outcome,
+each form submission with a request id that ties the whole flow together,
+admin logins and settings changes (keys only, never secret values), and a
+startup line with an auth check. Set `LOG_LEVEL=debug` for full request and
+response bodies (passwords and tokens are redacted). The admin console's
+"Recent activity" panel shows the last 200 events without a terminal.
+
+## Security notes
+
+- The admin console is protected by HTTP Basic auth (`ADMIN_USER` /
+  `ADMIN_PASSWORD`). Set a strong password and serve over HTTPS in any shared
+  environment.
+- The Saviynt service-account password is stored in `data/config.json` on the
+  volume in plain text. Restrict access to that volume. (A future option is to
+  encrypt it at rest with a key from the environment.)
+- Public form submissions are validated server-side, including re-checking
+  that a picked manager/user actually exists in Saviynt, so the browser can't
+  submit arbitrary values.
+
 ## Running a demo
 
 See [RUNBOOK.md](RUNBOOK.md).

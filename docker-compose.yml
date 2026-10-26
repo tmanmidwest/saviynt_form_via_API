@@ -11,6 +11,8 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
       # Set MOCK_MODE=true to run without a Saviynt tenant.
       MOCK_MODE: ${MOCK_MODE:-false}
+      # info (default) or debug (logs full request/response bodies, secrets redacted).
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       # Named volume so the Saviynt connection and forms set in the admin UI
       # survive redeploys and "Force recreate".

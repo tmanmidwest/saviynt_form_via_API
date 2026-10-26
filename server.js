@@ -86,8 +86,8 @@ app.put('/api/admin/connection', requireAdmin, (req, res) => {
   // Only overwrite the password when a new one is provided.
   if (b.password) patch.password = String(b.password);
   const c = store.setConnection(patch);
-  // Log which settings changed, never the values of secret ones.
-  log.info('admin.connection_updated', { reqId: req.reqId, changed: Object.keys(patch).concat(b.password ? ['password'] : []) });
+  // Log which settings changed (keys only, never the secret values).
+  log.info('admin.connection_updated', { reqId: req.reqId, changed: Object.keys(patch) });
   res.json({ ...c, password: '', hasPassword: Boolean(c.password) });
 });
 
@@ -205,11 +205,34 @@ app.post('/api/forms/:id/request', async (req, res) => {
   if (!organization) return res.status(400).json({ error: 'Please choose an organization.' });
 
   const user = {};
+  const lookupFields = [];
   for (const field of form.fields || []) {
     const value = String(body[field.key] ?? '').trim();
     if (field.required && !value) return res.status(400).json({ error: `${field.label} is required.` });
-    if (value) user[field.key] = value;
+    if (value) {
+      user[field.key] = value;
+      if (field.type === 'userLookup') lookupFields.push(field);
+    }
   }
+
+  // Re-validate user-lookup values server-side: the browser could submit any
+  // string. Confirm each picked user exists (and is in the org when scoped).
+  for (const field of lookupFields) {
+    const username = user[field.key];
+    try {
+      const raw = await clientFor(conn).searchUsers(userQuery(conn, username, form.scopeManagerToOrg ? organization : ''), { max: 50, reqId: req.reqId });
+      const match = raw.map(normalizeUser).find((u) => u.username.toLowerCase() === username.toLowerCase());
+      const inOrg = !form.scopeManagerToOrg || !match?.customer || match.customer === organization;
+      if (!match || !inOrg) {
+        log.warn('form.invalid_lookup', { reqId: req.reqId, formId: form.id, field: field.key, value: username });
+        return res.status(400).json({ error: `${field.label} "${username}" is not a valid Saviynt user${form.scopeManagerToOrg ? ' for this organization' : ''}.` });
+      }
+    } catch (err) {
+      log.warn('form.lookup_check_failed', { reqId: req.reqId, formId: form.id, field: field.key, error: err.message });
+      return res.status(502).json({ error: `Could not verify ${field.label.toLowerCase()}: ${err.message}` });
+    }
+  }
+
   if (!user.username && user.firstname && user.lastname) {
     user.username = `${user.firstname}.${user.lastname}`.toLowerCase().replace(/[^a-z0-9.]/g, '');
   }
