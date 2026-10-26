@@ -1,0 +1,15 @@
+services:
+  forms:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      # Admin console login (change these).
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      # Set MOCK_MODE=true to run without a Saviynt tenant.
+      MOCK_MODE: ${MOCK_MODE:-false}
+    volumes:
+      # Persists the Saviynt connection and all forms across restarts.
+      - ./data:/data
+    restart: unless-stopped

@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Saviynt Forms Admin</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f1f5f9; color: #1f2937; }
+    header { background: #0f172a; color: #fff; padding: 14px 24px; display: flex; justify-content: space-between; align-items: center; }
+    header a { color: #93c5fd; font-size: .85rem; }
+    .wrap { max-width: 860px; margin: 0 auto; padding: 24px 16px 80px; }
+    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px 24px; margin-bottom: 20px; }
+    h2 { font-size: 1.1rem; margin: 0 0 4px; }
+    .sub { color: #64748b; font-size: .85rem; margin: 0 0 16px; }
+    label { display: block; font-weight: 600; font-size: .82rem; margin: 12px 0 4px; }
+    .help { font-weight: 400; color: #64748b; font-size: .78rem; }
+    input, select, textarea { width: 100%; padding: 8px 10px; font-size: 14px; border: 1px solid #cbd5e1; border-radius: 7px; font-family: inherit; }
+    textarea { min-height: 60px; resize: vertical; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+    .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 12px; }
+    button { padding: 8px 16px; font-size: 14px; border-radius: 7px; border: 1px solid #cbd5e1; background: #fff; cursor: pointer; }
+    button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+    button.danger { background: #fff; color: #b91c1c; border-color: #fecaca; }
+    button.small { padding: 4px 10px; font-size: 13px; }
+    .row { display: flex; gap: 8px; align-items: center; }
+    .toolbar { display: flex; gap: 8px; margin-top: 16px; }
+    .msg { padding: 8px 12px; border-radius: 7px; font-size: .85rem; margin-top: 12px; display: none; }
+    .msg.ok { background: #ecfdf5; color: #065f46; display: block; }
+    .msg.err { background: #fef2f2; color: #991b1b; display: block; }
+    table { width: 100%; border-collapse: collapse; }
+    td, th { text-align: left; padding: 8px 6px; border-bottom: 1px solid #f1f5f9; font-size: .9rem; }
+    .pill { font-size: .75rem; padding: 2px 8px; border-radius: 999px; }
+    .pill.on { background: #dcfce7; color: #166534; }
+    .pill.off { background: #f1f5f9; color: #64748b; }
+    .field-row { display: grid; grid-template-columns: 1fr 1.3fr 90px 70px 1.3fr 30px; gap: 6px; align-items: center; margin-bottom: 6px; }
+    .field-row input, .field-row select { padding: 6px 8px; font-size: 13px; }
+    .field-head { font-size: .72rem; color: #64748b; font-weight: 600; }
+    .swatch { display: inline-block; width: 16px; height: 16px; border-radius: 3px; border: 1px solid #cbd5e1; vertical-align: middle; margin-right: 4px; }
+    .hidden { display: none; }
+    .muted { color: #64748b; }
+    a { color: #2563eb; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>Saviynt Forms — Admin</strong>
+    <a href="/" target="_blank">View site ↗</a>
+  </header>
+  <div class="wrap">
+
+    <!-- Connection -->
+    <div class="card">
+      <h2>Saviynt connection</h2>
+      <p class="sub">Shared by every form. The service account needs access to getOrganization, createUserRequest, and fetchRequestHistory.</p>
+      <div class="grid">
+        <div><label>Tenant URL <span class="help">(no /ECM)</span></label><input id="c-url" placeholder="https://tenant.saviyntcloud.com"></div>
+        <div><label>API path</label><input id="c-apiPath" placeholder="api/v5"></div>
+        <div><label>Service account username</label><input id="c-username"></div>
+        <div><label>Service account password <span class="help">(blank = keep current)</span></label><input id="c-password" type="password" placeholder="••••••••"></div>
+        <div><label>Requestor username <span class="help">(optional)</span></label><input id="c-requestor"></div>
+        <div><label>Organization attribute</label><input id="c-orgField" placeholder="customer"></div>
+      </div>
+      <label>Organization filter <span class="help">(optional orgQuery, e.g. c.parentorganization = 'External Partners')</span></label>
+      <input id="c-orgQuery">
+      <div class="toolbar">
+        <button class="primary" id="c-save">Save connection</button>
+        <button id="c-test">Test connection</button>
+      </div>
+      <div class="msg" id="c-msg"></div>
+    </div>
+
+    <!-- Forms list -->
+    <div class="card">
+      <h2>Forms</h2>
+      <p class="sub">Each form is a branded public page at <code>/f/&lt;name&gt;</code>.</p>
+      <table><tbody id="f-list"></tbody></table>
+      <div class="toolbar">
+        <input id="f-new-name" placeholder="New form name" style="max-width:260px">
+        <button class="primary" id="f-create">Create form</button>
+      </div>
+      <div class="msg" id="f-msg"></div>
+    </div>
+
+    <!-- Form editor -->
+    <div class="card hidden" id="editor">
+      <h2>Edit form: <span id="e-title"></span></h2>
+      <p class="sub">Public URL: <a id="e-link" target="_blank"></a></p>
+      <div class="grid">
+        <div><label>Form name</label><input id="e-name"></div>
+        <div><label>Published</label><select id="e-enabled"><option value="true">Yes</option><option value="false">No</option></select></div>
+        <div><label>Heading (product name)</label><input id="e-productName"></div>
+        <div><label>Tagline</label><input id="e-tagline"></div>
+      </div>
+      <label>Intro text</label><textarea id="e-intro"></textarea>
+      <label>Success message</label><textarea id="e-successMessage"></textarea>
+      <label>Logo URL <span class="help">(optional)</span></label><input id="e-logoUrl">
+
+      <label style="margin-top:18px">Colors</label>
+      <div class="grid3" id="colors"></div>
+
+      <label style="margin-top:18px">Fields <span class="help">(collected on the form; "key" is the Saviynt user attribute)</span></label>
+      <div class="field-row field-head"><div>Key</div><div>Label</div><div>Type</div><div>Required</div><div>Help</div><div></div></div>
+      <div id="fields"></div>
+      <button class="small" id="add-field" style="margin-top:6px">+ Add field</button>
+
+      <div class="grid" style="margin-top:18px">
+        <div><label>Organization filter override <span class="help">(optional orgQuery)</span></label><input id="e-orgQuery"></div>
+        <div><label>Organization attribute override <span class="help">(blank = use connection)</span></label><input id="e-orgField"></div>
+      </div>
+      <label>Roles to assign <span class="help">(optional, #### separated role names)</span></label><input id="e-roles">
+
+      <div class="toolbar">
+        <button class="primary" id="e-save">Save form</button>
+        <button id="e-close">Close</button>
+        <button class="danger" id="e-delete" style="margin-left:auto">Delete form</button>
+      </div>
+      <div class="msg" id="e-msg"></div>
+    </div>
+
+  </div>
+  <script src="/admin/admin.js"></script>
+</body>
+</html>

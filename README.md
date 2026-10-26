@@ -1,47 +1,57 @@
-# Saviynt request form
+# Saviynt Forms
 
-A small local app for demoing external-user onboarding with Saviynt EIC. A
-branded form lists organizations from Saviynt and submits a create-user
-request that runs through the approval workflow set up in the tenant.
+A self-hosted container app for building branded, external-user request forms
+backed by the Saviynt EIC API. Create and manage multiple forms from an admin
+console; each form lists organizations live from Saviynt and submits a
+create-user request that runs through your tenant's approval workflow.
 
-The browser only talks to the local Node backend. The backend holds the
-Saviynt service account, manages the bearer token, and calls the Saviynt API.
+Browsers only talk to this app. The app holds the Saviynt service account,
+manages the bearer token, and calls Saviynt.
 
-## Run it
+## Run with Docker
+
+```bash
+cp .env.example .env     # set ADMIN_PASSWORD (and MOCK_MODE=true to try it dry)
+docker compose up --build
+```
+
+Then:
+- **Admin console:** http://localhost:3000/admin (log in with `ADMIN_USER` /
+  `ADMIN_PASSWORD` from `.env`)
+- **Public site:** http://localhost:3000
+
+The Saviynt connection and all forms are stored in `data/config.json`, mounted
+as a volume so they survive restarts.
+
+## Run without Docker
 
 ```bash
 npm install
-cp .env.example .env   # fill in your tenant URL and service account
-npm start              # http://localhost:3000
+cp .env.example .env
+npm start            # or: npm run mock
 ```
 
-To try it without a tenant, run `npm run mock`, which serves sample
-organizations instead of calling Saviynt.
+## Using it
 
-## How the form works
+1. In the admin console, fill in the **Saviynt connection** (tenant URL,
+   `api/v5` path, service account, requestor) and click **Test connection**.
+   The service account needs access to `getOrganization`, `createUserRequest`,
+   and `fetchRequestHistory`.
+2. Create a **form**. Edit its heading, tagline, intro, colors, logo, and the
+   fields to collect. Set it to **Published** to make it live.
+3. Share the form's URL, `/f/<name>`. The requester picks an organization
+   (live from Saviynt), enters details, reviews, and submits.
 
-1. **Organization** — a live dropdown of active Saviynt organizations.
-2. **User details** — fields driven by the brand config (first/last name,
-   email, manager by default).
-3. **Review & submit** — opens a `createUserRequest`, which enters the
-   tenant's approval workflow. The returned request ID is shown.
+### How the organization is set
 
-The chosen organization is written to the Saviynt attribute named by
-`SAVIYNT_ORG_FIELD` (default `customproperty1`). Set that to whatever
-attribute your approval workflow actually keys on so the request routes to
-the right org/manager approver.
-
-## Branding
-
-Each brand is a JSON file in `brands/`. Copy `brands/default.json` (or
-`brands/acme.example.json`) to `brands/<yourbrand>.json`, edit the logo URL,
-colors, wording and fields, then run with `BRAND=<yourbrand>`. Edits show up
-on page refresh without a restart.
+The chosen organization is written to the native Saviynt user attribute
+**`customer`** (the API reference describes `customer` as "pass the
+organization name"). Change the **Organization attribute** on the connection,
+or per form, if your workflow routes on something else.
 
 ## Saviynt APIs used
 
-These match the Saviynt EIC v24.2 Postman collection. `{{url}}` is
-`SAVIYNT_URL` and `{{path}}` is `SAVIYNT_API_PATH` (usually `api/v5`).
+`{{url}}` is the tenant URL, `{{path}}` the API path (usually `api/v5`).
 
 | Purpose | Call |
 | --- | --- |
@@ -49,25 +59,17 @@ These match the Saviynt EIC v24.2 Postman collection. `{{url}}` is
 | Refresh token | `POST {{url}}/ECM/oauth/access_token` |
 | List organizations | `POST {{url}}/ECM/{{path}}/getOrganization` |
 | Create user request | `POST {{url}}/ECM/{{path}}/createUserRequest` |
-
-The service account needs permission to call these APIs (for example
-`ROLE_ADMIN` in a demo tenant). Set `SAVIYNT_ORG_QUERY` to limit which
-organizations the form offers, using the `orgQuery` syntax from the
-collection, e.g. `c.parentorganization = 'External Partners'`.
-
-## Checking status
-
-After submitting, the success screen links to `status.html`, which looks up
-the request via `fetchRequestHistory` and can auto-refresh — useful for
-showing an approval land live during a demo.
+| Request status | `POST {{url}}/ECM/{{path}}/fetchRequestHistory` |
 
 ## Running a demo
 
-See [RUNBOOK.md](RUNBOOK.md) for a step-by-step walkthrough.
+See [RUNBOOK.md](RUNBOOK.md).
 
-## Backend endpoints
+## Layout
 
-- `GET /api/health`: checks that the service account can log in.
-- `GET /api/organizations`: active organizations, sorted by name.
-- `POST /api/request`: submits a create-user request.
-- `GET /api/request-status?requestId=...`: status of a submitted request.
+- `server.js` — Express app (admin API, public form API, static pages)
+- `lib/saviynt.js` — Saviynt client (login, token refresh, calls)
+- `lib/store.js` — reads/writes `data/config.json`
+- `lib/clients.js` — builds and caches the client from the stored connection
+- `lib/mock.js` — offline stand-in for `MOCK_MODE=true`
+- `public/` — landing page, `form.html` (public form), `status.html`, `admin/`

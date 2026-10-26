@@ -1,2 +1,4 @@
 node_modules/
 .env
+# Runtime config (Saviynt credentials + forms) lives on the mounted volume.
+data/

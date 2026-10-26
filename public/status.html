@@ -28,21 +28,24 @@
       <button id="go">Check</button>
     </div>
     <div id="out"></div>
-    <label class="auto"><input type="checkbox" id="auto"> Auto-refresh every 10s (handy while an approver acts during the demo)</label>
+    <label class="auto"><input type="checkbox" id="auto"> Auto-refresh every 10s</label>
   </div>
 
   <script>
     const $ = (id) => document.getElementById(id);
+    const params = new URLSearchParams(location.search);
+    const FORM_ID = params.get('form') || '';
     let timer = null;
+    function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
     async function check() {
       const id = $('rid').value.trim();
-      if (!id) return;
+      if (!id || !FORM_ID) { if (!FORM_ID) $('out').innerHTML = '<p class="err">Open this page from a form so it knows which form to check.</p>'; return; }
       $('go').disabled = true;
       try {
-        const res = await fetch('/api/request-status?requestId=' + encodeURIComponent(id));
+        const res = await fetch(`/api/forms/${encodeURIComponent(FORM_ID)}/request-status?requestId=${encodeURIComponent(id)}`);
         const d = await res.json();
-        if (!res.ok) { $('out').innerHTML = `<p class="err">${d.error}</p>`; return; }
+        if (!res.ok) { $('out').innerHTML = `<p class="err">${esc(d.error)}</p>`; return; }
         $('out').innerHTML = `
           <dl>
             <dt>Status</dt><dd><span class="status-pill">${esc(d.status || 'Unknown')}</span></dd>
@@ -54,22 +57,17 @@
           </dl>
           <p class="auto">Updated ${new Date().toLocaleTimeString()}</p>`;
       } catch (err) {
-        $('out').innerHTML = `<p class="err">${err.message}</p>`;
+        $('out').innerHTML = `<p class="err">${esc(err.message)}</p>`;
       } finally {
         $('go').disabled = false;
       }
     }
-    function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
-    const preset = new URLSearchParams(location.search).get('requestId');
+    const preset = params.get('requestId');
     if (preset) { $('rid').value = preset; check(); }
-
     $('go').addEventListener('click', check);
     $('rid').addEventListener('keydown', (e) => { if (e.key === 'Enter') check(); });
-    $('auto').addEventListener('change', (e) => {
-      clearInterval(timer);
-      if (e.target.checked) timer = setInterval(check, 10000);
-    });
+    $('auto').addEventListener('change', (e) => { clearInterval(timer); if (e.target.checked) timer = setInterval(check, 10000); });
   </script>
 </body>
 </html>

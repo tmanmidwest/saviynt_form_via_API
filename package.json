@@ -1,7 +1,7 @@
 {
-  "name": "saviynt-request-form",
+  "name": "saviynt-forms",
   "version": "1.0.0",
-  "description": "Branded external-user request form backed by the Saviynt EIC API",
+  "description": "Self-hosted container app for branded Saviynt external-user request forms",
   "main": "server.js",
   "directories": {
     "lib": "lib"
