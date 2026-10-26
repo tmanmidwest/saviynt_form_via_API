@@ -33,14 +33,13 @@ async function loadConnection() {
   $('c-orgField').value = c.orgField || 'customer';
   $('c-orgQuery').value = c.orgQuery || '';
   $('c-userSearchFields').value = c.userSearchFields || '';
-  $('c-userSearchQuery').value = c.userSearchQuery || '';
 }
 $('c-save').addEventListener('click', async () => {
   try {
     const body = {
       url: $('c-url').value, apiPath: $('c-apiPath').value, username: $('c-username').value,
       requestor: $('c-requestor').value, orgField: $('c-orgField').value, orgQuery: $('c-orgQuery').value,
-      userSearchFields: $('c-userSearchFields').value, userSearchQuery: $('c-userSearchQuery').value,
+      userSearchFields: $('c-userSearchFields').value,
     };
     if ($('c-password').value) body.password = $('c-password').value;
     await api('PUT', '/api/admin/connection', body);

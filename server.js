@@ -85,42 +85,26 @@ function publicForm(form) {
   return rest;
 }
 
-// A saved userSearchQuery equal to the old default is treated as blank, so
-// volumes written by earlier builds don't override the multi-field search.
-const LEGACY_QUERY = 'username:{q}*';
-function effectiveSearchQuery(conn) {
-  const q = (conn.userSearchQuery || '').trim();
-  return q && q !== LEGACY_QUERY ? q : '';
-}
-
-// Build the Saviynt user-search query from the connection template.
-function userQuery(conn, text, org) {
-  const tpl = effectiveSearchQuery(conn) || 'username:{q}*';
-  return tpl.replace(/\{q\}/g, text || '*').replace(/\{org\}/g, org || '');
-}
-
-// Normalize a user record from the search (live keys are inconsistent) to the
-// few fields the picker needs.
+// Normalize a user record from getUser's userlist to the fields the picker needs.
 function normalizeUser(u) {
   const username = u.username || u['User Name'] || u.systemusername || '';
   const first = u.firstname || '';
   const last = u.lastname || u['Last Name'] || '';
   const name = [first, last].filter(Boolean).join(' ').trim() || u.displayname || username;
-  return { username, name, email: u.email || '', title: u.title || '', customer: u.customer || '' };
+  return { username, name, email: u.email || '', title: u.title || '', customer: u.customer || '', statuskey: String(u.statuskey ?? '') };
 }
 
 // ---- Admin API ------------------------------------------------------------
 app.get('/api/admin/connection', requireAdmin, (req, res) => {
   const c = store.getConnection();
-  // Never echo the stored password back; just whether one is set. Blank out a
-  // legacy userSearchQuery so the UI shows it as empty (multi-field search).
-  res.json({ ...c, userSearchQuery: effectiveSearchQuery(c), password: '', hasPassword: Boolean(c.password) });
+  // Never echo the stored password back; just whether one is set.
+  res.json({ ...c, password: '', hasPassword: Boolean(c.password) });
 });
 
 app.put('/api/admin/connection', requireAdmin, (req, res) => {
   const b = req.body || {};
   const patch = {};
-  for (const k of ['url', 'apiPath', 'username', 'requestor', 'orgField', 'orgQuery', 'userSearchFields', 'userSearchQuery']) {
+  for (const k of ['url', 'apiPath', 'username', 'requestor', 'orgField', 'orgQuery', 'userSearchFields']) {
     if (b[k] !== undefined) patch[k] = String(b[k]).trim();
   }
   // Only overwrite the password when a new one is provided.
@@ -233,27 +217,28 @@ app.get('/api/forms/:id/users', async (req, res) => {
   const { conn } = settingsFor(form);
   const client = clientFor(conn);
 
-  // Build one or more Saviynt queries. If an advanced template is set, use it;
-  // otherwise search each configured field (merged), so typing a name works
-  // even when usernames don't look like names.
-  let queries;
-  if (effectiveSearchQuery(conn)) {
-    queries = [userQuery(conn, text, scoped ? org : '')];
-  } else if (text.length >= 2) {
+  // One getUser filtercriteria per configured field (results merged), using a
+  // trailing "%" for a prefix match, so typing a name works. When scoped to an
+  // org, AND the customer attribute into each query.
+  const orgClause = scoped ? { customer: org } : {};
+  let filters;
+  if (text.length >= 2) {
     const fields = (conn.userSearchFields || 'username,firstname,lastname,email').split(',').map((s) => s.trim()).filter(Boolean);
-    queries = fields.map((f) => `${f}:${text}*`);
+    filters = fields.map((f) => ({ [f]: `${text}%`, ...orgClause }));
   } else {
     // Scoped browse with no text: list the org's members.
-    queries = [`customer:${org}`];
+    filters = [orgClause];
   }
 
   const seen = new Set();
   const merged = [];
   let lastErr = null;
-  for (const q of queries) {
+  for (const filter of filters) {
     try {
-      const raw = await client.searchUsers(q, { max: 20, reqId: req.reqId });
+      const raw = await client.searchUsers(filter, { max: 20, reqId: req.reqId });
       for (const u of raw.map(normalizeUser)) {
+        // Only active users (statuskey "1"); keep when status is unknown.
+        if (u.statuskey && u.statuskey !== '1') continue;
         const key = u.username.toLowerCase();
         if (u.username && !seen.has(key)) { seen.add(key); merged.push(u); }
       }
@@ -261,7 +246,6 @@ app.get('/api/forms/:id/users', async (req, res) => {
       lastErr = err; // a single field query may be rejected; keep the others.
     }
   }
-  // Only surface an error if every query failed (so the UI can say so).
   if (!merged.length && lastErr) {
     log.warn('users.lookup_failed', { reqId: req.reqId, formId: form.id, error: lastErr.message });
     return res.status(502).json({ error: lastErr.message });
@@ -271,10 +255,10 @@ app.get('/api/forms/:id/users', async (req, res) => {
   const users = merged
     .filter((u) => !needle || [u.name, u.username, u.email, u.title].some((v) => v.toLowerCase().includes(needle)))
     .filter((u) => !scoped || !u.customer || u.customer === org)
+    .map(({ statuskey, ...u }) => u)
     .slice(0, 10);
-  // Diagnostic: raw = users Saviynt returned across queries, matched = after
-  // filtering. raw>0 & matched=0 => parse/filter; raw=0 => query returned none.
-  log.info('users.lookup', { reqId: req.reqId, formId: form.id, q: text, queries: queries.length, raw: merged.length, matched: users.length });
+  // Diagnostic: raw = users returned across queries, matched = after filtering.
+  log.info('users.lookup', { reqId: req.reqId, formId: form.id, q: text, queries: filters.length, raw: merged.length, matched: users.length });
   res.json({ users });
 });
 
@@ -303,8 +287,8 @@ app.post('/api/forms/:id/request', async (req, res) => {
   for (const field of lookupFields) {
     const username = user[field.key];
     try {
-      // Validate by exact username regardless of the display search config.
-      const raw = await clientFor(conn).searchUsers(`username:${username}`, { max: 10, reqId: req.reqId });
+      // Validate by exact username (no % = exact match in getUser).
+      const raw = await clientFor(conn).searchUsers({ username }, { max: 10, reqId: req.reqId });
       const match = raw.map(normalizeUser).find((u) => u.username.toLowerCase() === username.toLowerCase());
       const inOrg = !form.scopeManagerToOrg || !match?.customer || match.customer === organization;
       if (!match || !inOrg) {

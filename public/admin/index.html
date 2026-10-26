@@ -63,10 +63,8 @@
       </div>
       <label>Organization filter <span class="help">(optional orgQuery, e.g. c.parentorganization = 'External Partners')</span></label>
       <input id="c-orgQuery">
-      <label>User lookup fields <span class="help">(manager/user pickers search each of these; comma-separated)</span></label>
+      <label>User lookup fields <span class="help">(manager/user pickers do a partial-match search on each of these; comma-separated)</span></label>
       <input id="c-userSearchFields" placeholder="username,firstname,lastname,email">
-      <label>User lookup query <span class="help">(advanced: overrides the fields above; {q} = typed text, {org} = org)</span></label>
-      <input id="c-userSearchQuery" placeholder="(blank — use fields above)">
       <div class="toolbar">
         <button class="primary" id="c-save">Save connection</button>
         <button id="c-test">Test connection</button>
