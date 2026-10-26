@@ -109,6 +109,32 @@ app.post('/api/request', async (req, res) => {
   }
 });
 
+// Looks up the status of a submitted request. fetchRequestHistory needs a
+// username (the logged-in requestor); we use SAVIYNT_REQUESTOR, falling back
+// to the service account.
+app.get('/api/request-status', async (req, res) => {
+  const requestId = String(req.query.requestId || '').trim();
+  if (!requestId) return res.status(400).json({ error: 'requestId is required.' });
+  const username = process.env.SAVIYNT_REQUESTOR || process.env.SAVIYNT_USERNAME || 'admin';
+  try {
+    const data = await saviynt.fetchRequestHistory({ username, requestid: requestId, max: '1' });
+    const r = (data.requests || [])[0];
+    if (!r) return res.status(404).json({ error: `No request found with ID ${requestId}.` });
+    res.json({
+      requestId: r.requestid,
+      type: r.requesttype,
+      requestedFor: r.requestedfor,
+      submittedOn: r.requestsubmittedon,
+      status: r.status ? r.status.trim() : '',
+      assignee: r.assignee || '',
+      detail: r.requestandtaskstatus || '',
+    });
+  } catch (err) {
+    console.error('fetchRequestHistory failed:', err.message, err.saviynt || '');
+    res.status(502).json({ error: err.message });
+  }
+});
+
 const port = Number(process.env.PORT) || 3000;
 app.listen(port, () => {
   console.log(`Saviynt request form on http://localhost:${port} (${mockMode ? 'mock' : 'live'} mode)`);

@@ -122,6 +122,7 @@ $('submit').addEventListener('click', async () => {
     if (body.requestId) {
       $('reqid').textContent = body.requestId;
       $('reqid-wrap').classList.remove('hidden');
+      $('status-link').href = 'status.html?requestId=' + encodeURIComponent(body.requestId);
     }
     showStep('done');
   } catch (err) {

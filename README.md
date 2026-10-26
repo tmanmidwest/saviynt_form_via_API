@@ -55,7 +55,19 @@ The service account needs permission to call these APIs (for example
 organizations the form offers, using the `orgQuery` syntax from the
 collection, e.g. `c.parentorganization = 'External Partners'`.
 
+## Checking status
+
+After submitting, the success screen links to `status.html`, which looks up
+the request via `fetchRequestHistory` and can auto-refresh — useful for
+showing an approval land live during a demo.
+
+## Running a demo
+
+See [RUNBOOK.md](RUNBOOK.md) for a step-by-step walkthrough.
+
 ## Backend endpoints
 
 - `GET /api/health`: checks that the service account can log in.
 - `GET /api/organizations`: active organizations, sorted by name.
+- `POST /api/request`: submits a create-user request.
+- `GET /api/request-status?requestId=...`: status of a submitted request.
