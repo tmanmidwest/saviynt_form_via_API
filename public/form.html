@@ -41,6 +41,11 @@
     .hidden { display: none; }
     footer { text-align: center; color: var(--muted); font-size: .75rem; margin-top: 20px; }
     a { color: var(--primary); }
+    .lookup { position: relative; }
+    .results { position: absolute; left: 0; right: 0; top: 100%; z-index: 10; background: #fff; border: 1px solid var(--border); border-radius: 8px; margin-top: 4px; box-shadow: 0 4px 12px rgba(0,0,0,.08); display: none; max-height: 240px; overflow-y: auto; }
+    .result { padding: 8px 12px; cursor: pointer; font-size: .9rem; }
+    .result:hover { background: var(--bg); }
+    .result .sub { color: var(--muted); font-size: .8rem; }
   </style>
 </head>
 <body>

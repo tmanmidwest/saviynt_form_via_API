@@ -32,12 +32,14 @@ async function loadConnection() {
   $('c-requestor').value = c.requestor || '';
   $('c-orgField').value = c.orgField || 'customer';
   $('c-orgQuery').value = c.orgQuery || '';
+  $('c-userSearchQuery').value = c.userSearchQuery || '';
 }
 $('c-save').addEventListener('click', async () => {
   try {
     const body = {
       url: $('c-url').value, apiPath: $('c-apiPath').value, username: $('c-username').value,
       requestor: $('c-requestor').value, orgField: $('c-orgField').value, orgQuery: $('c-orgQuery').value,
+      userSearchQuery: $('c-userSearchQuery').value,
     };
     if ($('c-password').value) body.password = $('c-password').value;
     await api('PUT', '/api/admin/connection', body);
@@ -91,7 +93,7 @@ function fieldRow(f = {}) {
   div.innerHTML = `
     <input class="fk" placeholder="firstname" value="${esc(f.key || '')}">
     <input class="fl" placeholder="First name" value="${esc(f.label || '')}">
-    <select class="ft">${['text', 'email', 'tel', 'number'].map((t) => `<option ${f.type === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
+    <select class="ft">${['text', 'email', 'tel', 'number', 'userLookup'].map((t) => `<option ${f.type === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
     <select class="fr"><option value="true" ${f.required ? 'selected' : ''}>Yes</option><option value="false" ${!f.required ? 'selected' : ''}>No</option></select>
     <input class="fh" placeholder="help text" value="${esc(f.help || '')}">
     <button class="small danger" title="Remove">✕</button>`;
@@ -113,6 +115,7 @@ async function openEditor(id) {
   $('e-logoUrl').value = editing.logoUrl || '';
   $('e-orgQuery').value = editing.orgQuery || '';
   $('e-orgField').value = editing.orgField || '';
+  $('e-scopeManagerToOrg').value = String(editing.scopeManagerToOrg === true);
   $('e-roles').value = editing.roles || '';
   colorInputs(editing.colors || {});
   $('fields').innerHTML = '';
@@ -136,7 +139,8 @@ $('e-save').addEventListener('click', async () => {
     productName: $('e-productName').value.trim(), tagline: $('e-tagline').value.trim(),
     intro: $('e-intro').value, successMessage: $('e-successMessage').value,
     logoUrl: $('e-logoUrl').value.trim(), colors, fields,
-    orgQuery: $('e-orgQuery').value.trim(), orgField: $('e-orgField').value.trim(), roles: $('e-roles').value.trim(),
+    orgQuery: $('e-orgQuery').value.trim(), orgField: $('e-orgField').value.trim(),
+    scopeManagerToOrg: $('e-scopeManagerToOrg').value === 'true', roles: $('e-roles').value.trim(),
   };
   try {
     editing = await api('PUT', `/api/admin/forms/${encodeURIComponent(editing.id)}`, patch);
@@ -153,8 +157,25 @@ $('e-delete').addEventListener('click', async () => {
   } catch (e) { msg($('e-msg'), e.message, 'err'); }
 });
 
+// ---- Recent activity ----
+let logTimer = null;
+async function loadLogs() {
+  try {
+    const { level, events } = await api('GET', '/api/admin/logs?limit=200');
+    $('log-level').textContent = level;
+    $('log-list').innerHTML = events.length ? events.map((e) => {
+      const { ts, level: lvl, event, reqId, ...rest } = e;
+      const t = new Date(ts).toLocaleTimeString();
+      const detail = Object.entries(rest).map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' ');
+      return `<tr><td class="muted" style="white-space:nowrap">${esc(t)}</td><td><strong>${esc(event)}</strong> <span class="muted">${esc(detail)}</span></td></tr>`;
+    }).join('') : '<tr><td class="muted">No events yet.</td></tr>';
+  } catch (e) { $('log-list').innerHTML = `<tr><td class="muted">Could not load logs: ${esc(e.message)}</td></tr>`; }
+}
+$('log-refresh').addEventListener('click', loadLogs);
+$('log-auto').addEventListener('change', (e) => { clearInterval(logTimer); if (e.target.checked) logTimer = setInterval(loadLogs, 5000); });
+
 // ---- Init ----
 (async function init() {
-  try { await loadConnection(); await loadForms(); }
+  try { await loadConnection(); await loadForms(); await loadLogs(); }
   catch (e) { msg($('c-msg'), 'Load failed: ' + e.message, 'err'); }
 })();

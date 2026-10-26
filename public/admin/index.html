@@ -63,6 +63,8 @@
       </div>
       <label>Organization filter <span class="help">(optional orgQuery, e.g. c.parentorganization = 'External Partners')</span></label>
       <input id="c-orgQuery">
+      <label>User lookup query <span class="help">(for manager/user pickers; {q} = typed text, {org} = selected org)</span></label>
+      <input id="c-userSearchQuery" placeholder="username:{q}*">
       <div class="toolbar">
         <button class="primary" id="c-save">Save connection</button>
         <button id="c-test">Test connection</button>
@@ -108,6 +110,8 @@
         <div><label>Organization filter override <span class="help">(optional orgQuery)</span></label><input id="e-orgQuery"></div>
         <div><label>Organization attribute override <span class="help">(blank = use connection)</span></label><input id="e-orgField"></div>
       </div>
+      <label>Scope manager/user lookups to selected organization</label>
+      <select id="e-scopeManagerToOrg"><option value="false">No</option><option value="true">Yes</option></select>
       <label>Roles to assign <span class="help">(optional, #### separated role names)</span></label><input id="e-roles">
 
       <div class="toolbar">
@@ -116,6 +120,14 @@
         <button class="danger" id="e-delete" style="margin-left:auto">Delete form</button>
       </div>
       <div class="msg" id="e-msg"></div>
+    </div>
+
+    <!-- Recent activity -->
+    <div class="card">
+      <h2>Recent activity</h2>
+      <p class="sub">Latest events (also printed as JSON to the container logs). Log level: <code id="log-level">—</code></p>
+      <div class="toolbar" style="margin-top:0"><button id="log-refresh" class="small">Refresh</button><label style="font-weight:400;margin:0 0 0 auto"><input type="checkbox" id="log-auto"> Auto-refresh</label></div>
+      <table><tbody id="log-list"></tbody></table>
     </div>
 
   </div>

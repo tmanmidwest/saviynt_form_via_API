@@ -6,6 +6,7 @@ const FORM_ID = decodeURIComponent(location.pathname.split('/').filter(Boolean).
 let form = null;
 let orgs = [];
 const data = {};
+const displays = {}; // field key -> label shown in review (for lookups)
 
 function esc(s) {
   return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -38,9 +39,54 @@ function applyForm() {
   $('fields').innerHTML = (form.fields || []).map((f) => {
     const req = f.required ? ' *' : '';
     const help = f.help ? `<div class="help">${esc(f.help)}</div>` : '';
-    return `<label for="f-${esc(f.key)}">${esc(f.label)}${req}</label>${help}` +
-      `<input id="f-${esc(f.key)}" type="${esc(f.type || 'text')}" data-key="${esc(f.key)}">`;
+    const label = `<label for="f-${esc(f.key)}">${esc(f.label)}${req}</label>${help}`;
+    if (f.type === 'userLookup') {
+      return label +
+        `<div class="lookup"><input id="f-${esc(f.key)}" type="text" autocomplete="off" placeholder="Start typing a name…">` +
+        `<div class="results" id="r-${esc(f.key)}"></div></div>`;
+    }
+    return label + `<input id="f-${esc(f.key)}" type="${esc(f.type || 'text')}" data-key="${esc(f.key)}">`;
   }).join('');
+
+  // Wire up any user-lookup fields.
+  (form.fields || []).filter((f) => f.type === 'userLookup').forEach(wireLookup);
+}
+
+function wireLookup(f) {
+  const input = $(`f-${f.key}`);
+  const results = $(`r-${f.key}`);
+  let timer = null;
+
+  function close() { results.style.display = 'none'; results.innerHTML = ''; }
+
+  async function search() {
+    const q = input.value.trim();
+    // Selecting then editing clears the stored choice.
+    if (data[f.key] && q !== displays[f.key]) { delete data[f.key]; delete displays[f.key]; }
+    const params = new URLSearchParams({ q });
+    if (data.organization) params.set('org', data.organization);
+    try {
+      const res = await fetch(`/api/forms/${encodeURIComponent(FORM_ID)}/users?${params.toString()}`);
+      const body = await res.json();
+      const users = (body.users || []);
+      if (!users.length) { close(); return; }
+      results.innerHTML = users.map((u, i) => {
+        const sub = [u.title, u.email].filter(Boolean).join(' · ');
+        return `<div class="result" data-i="${i}"><strong>${esc(u.name)}</strong>${sub ? `<br><span class="sub">${esc(sub)}</span>` : ''}</div>`;
+      }).join('');
+      results.style.display = 'block';
+      results.querySelectorAll('.result').forEach((el) => el.addEventListener('click', () => {
+        const u = users[el.dataset.i];
+        data[f.key] = u.username;           // submit the username
+        displays[f.key] = `${u.name}${u.email ? ` (${u.email})` : ''}`;
+        input.value = displays[f.key];
+        close();
+      }));
+    } catch { close(); }
+  }
+
+  input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(search, 250); });
+  input.addEventListener('blur', () => setTimeout(close, 200));
 }
 
 async function loadOrgs() {
@@ -56,11 +102,18 @@ async function loadOrgs() {
 
 function reviewList() {
   const rows = [['Organization', data.organization]];
-  for (const f of form.fields || []) if (data[f.key]) rows.push([f.label, data[f.key]]);
+  for (const f of form.fields || []) {
+    if (data[f.key]) rows.push([f.label, displays[f.key] || data[f.key]]);
+  }
   $('review').innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
 }
 function validateFields() {
   for (const f of form.fields || []) {
+    if (f.type === 'userLookup') {
+      // Value comes from a picked result, not the raw text.
+      if (f.required && !data[f.key]) { banner(`Please choose a ${f.label.toLowerCase()} from the list.`, 'error'); return false; }
+      continue;
+    }
     const val = $(`f-${f.key}`).value.trim();
     if (f.required && !val) { banner(`${f.label} is required.`, 'error'); return false; }
     data[f.key] = val;
@@ -80,6 +133,7 @@ $('to-2').addEventListener('click', () => { if (validateFields()) { reviewList()
 $('back-1').addEventListener('click', () => showStep(1));
 $('again').addEventListener('click', () => {
   Object.keys(data).forEach((k) => delete data[k]);
+  Object.keys(displays).forEach((k) => delete displays[k]);
   $('org').value = ''; $('org-detail').textContent = ''; $('to-1').disabled = true;
   document.querySelectorAll('#fields input').forEach((i) => (i.value = ''));
   showStep(0);
