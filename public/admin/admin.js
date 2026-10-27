@@ -117,6 +117,7 @@ async function openEditor(id) {
   $('e-orgField').value = editing.orgField || '';
   $('e-scopeManagerToOrg').value = String(editing.scopeManagerToOrg === true);
   $('e-roles').value = editing.roles || '';
+  $('e-requestParams').value = editing.requestParams || '';
   colorInputs(editing.colors || {});
   $('fields').innerHTML = '';
   (editing.fields || []).forEach((f) => $('fields').appendChild(fieldRow(f)));
@@ -146,6 +147,7 @@ $('e-save').addEventListener('click', async () => {
     logoUrl: $('e-logoUrl').value.trim(), colors, fields,
     orgQuery: $('e-orgQuery').value.trim(), orgField: $('e-orgField').value.trim(),
     scopeManagerToOrg: $('e-scopeManagerToOrg').value === 'true', roles: $('e-roles').value.trim(),
+    requestParams: $('e-requestParams').value,
   };
   try {
     editing = await api('PUT', `/api/admin/forms/${encodeURIComponent(editing.id)}`, patch);

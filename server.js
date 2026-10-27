@@ -97,6 +97,22 @@ function normalizeUser(u) {
 // Final shaping shared by the real submit and the admin API preview: username
 // fallback, the org attribute, roles and requestor. Keeping both on one function
 // means the preview can't drift from what's actually sent.
+// Parse per-form "extra request parameters" (key=value, one per line) into an
+// object. Blank lines and #-comments are ignored. These are tenant-specific
+// flags sent with createUserRequest, e.g. dynattrvalidation=true.
+function parseRequestParams(text) {
+  const out = {};
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t || t.startsWith('#')) continue;
+    const i = t.indexOf('=');
+    if (i === -1) continue;
+    const k = t.slice(0, i).trim();
+    if (k) out[k] = t.slice(i + 1).trim();
+  }
+  return out;
+}
+
 function finalizeUserPayload(user, { form, orgField, conn, organization }) {
   if (!user.username && user.firstname && user.lastname) {
     user.username = `${user.firstname}.${user.lastname}`.toLowerCase().replace(/[^a-z0-9.]/g, '');
@@ -104,6 +120,11 @@ function finalizeUserPayload(user, { form, orgField, conn, organization }) {
   user[orgField] = organization;
   if (form.roles) user.Roles = form.roles;
   if (conn.requestor) user.requestor = conn.requestor;
+  // Tenant-specific flags (dynattrvalidation, inlineruleevaluation, …); don't
+  // override a value a form field already set.
+  for (const [k, v] of Object.entries(parseRequestParams(form.requestParams))) {
+    if (user[k] === undefined) user[k] = v;
+  }
   return user;
 }
 
@@ -376,12 +397,14 @@ app.post('/api/forms/:id/request', async (req, res) => {
   // Shape the final payload (username fallback, org attribute, roles, requestor).
   finalizeUserPayload(user, { form, orgField, conn, organization });
 
-  log.info('form.submit', { reqId: req.reqId, formId: form.id, organization, username: user.username, manager: user.manager || null });
+  log.info('form.submit', { reqId: req.reqId, formId: form.id, organization, username: user.username, sponsor: user.owner || user.manager || null });
   try {
     const result = await clientFor(conn).createUserRequest(user, { reqId: req.reqId });
     const requestId = result.requestid || result.requestId || null;
-    log.info('form.submit_ok', { reqId: req.reqId, formId: form.id, requestId });
-    res.json({ ok: true, requestId, message: result.msg || 'Request submitted.' });
+    const requestKey = result.requestkey || result.requestKey || null;
+    const workflow = result.jbpmid || null; // e.g. "ExternalIdentityWorkflow.<id>"
+    log.info('form.submit_ok', { reqId: req.reqId, formId: form.id, requestId, requestKey, workflow });
+    res.json({ ok: true, requestId, requestKey, workflow, message: result.msg || 'Request submitted.' });
   } catch (err) {
     log.error('form.submit_failed', { reqId: req.reqId, formId: form.id, error: err.message });
     res.status(502).json({ error: err.message });
