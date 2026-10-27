@@ -121,14 +121,54 @@ function finalizeUserPayload(user, { form, orgField, conn, organization }) {
   if (form.roles) user.Roles = form.roles;
   if (conn.requestor) user.requestor = conn.requestor;
   // Tenant-specific flags (dynattrvalidation, inlineruleevaluation, …); don't
-  // override a value a form field already set.
-  for (const [k, v] of Object.entries(parseRequestParams(form.requestParams))) {
+  // override a value a form field already set. Forms saved before this field
+  // existed have no requestParams, so fall back to the defaults (but an admin
+  // who deliberately cleared it to "" gets none).
+  const params = form.requestParams ?? DEFAULT_REQUEST_PARAMS;
+  for (const [k, v] of Object.entries(parseRequestParams(params))) {
     if (user[k] === undefined) user[k] = v;
   }
   return user;
 }
 
-// Usernames of the valid sponsors for an org: its primary contact plus any
+// The valid sponsors Saviynt will actually accept for an org: its primary
+// contact (always), plus org owners who already manage at least one user. The
+// tenant's sponsor (manager→owner) attribute only accepts those, so listing
+// anyone else produces "owner <x> not found" on submit. Returns resolved
+// {username,name,email}.
+async function validOrgSponsors(client, org, reqId) {
+  if (!org) return [];
+  const primary = String(org.primaryvendorcontact || org.primarycontact || org.primaryVendorContact || '').trim();
+  const owners = sponsorUsernames(org).filter((u) => u.toLowerCase() !== primary.toLowerCase());
+  const candidates = [];
+  if (primary) candidates.push({ un: primary, always: true });
+  for (const o of owners) candidates.push({ un: o, always: false });
+
+  const out = [];
+  const seen = new Set();
+  for (const c of candidates) {
+    const key = c.un.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    let ok = c.always;
+    if (!ok) {
+      // Valid iff they manage at least one user.
+      try { ok = (await client.searchUsers({ manager: c.un }, { max: 1, reqId })).length > 0; } catch { ok = false; }
+    }
+    if (!ok) continue;
+    let resolved = { username: c.un, name: c.un, email: '' };
+    try {
+      const u = (await client.searchUsers({ username: c.un }, { max: 1, reqId })).map(normalizeUser).find((x) => x.username.toLowerCase() === key);
+      if (u) resolved = { username: u.username, name: u.name, email: u.email };
+    } catch { /* keep the bare username */ }
+    out.push(resolved);
+  }
+  return out;
+}
+
+const DEFAULT_REQUEST_PARAMS = 'dynattrvalidation=true\ninlineruleevaluation=true\ncheckrules=true';
+
+// Usernames of the candidate sponsors for an org: its primary contact plus any
 // organization owners. getOrganization returns primaryvendorcontact (a username
 // string) and organizationowners (an array); shapes vary, so be defensive.
 function sponsorUsernames(org) {
@@ -384,20 +424,7 @@ app.get('/api/forms/:id/sponsors', async (req, res) => {
     const client = clientFor(conn);
     const orgs = await client.getOrganizations({ orgQuery: orgQuery || undefined, reqId: req.reqId });
     const match = orgs.find((o) => String(o.organizationname || '') === org);
-    const sponsors = [];
-    const seen = new Set();
-    for (const un of sponsorUsernames(match)) {
-      const key = un.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      let resolved = { username: un, name: un, email: '' };
-      try {
-        const raw = await client.searchUsers({ username: un }, { max: 1, reqId: req.reqId });
-        const u = raw.map(normalizeUser).find((x) => x.username.toLowerCase() === key);
-        if (u) resolved = { username: u.username, name: u.name, email: u.email };
-      } catch { /* fall back to the bare username */ }
-      sponsors.push(resolved);
-    }
+    const sponsors = await validOrgSponsors(client, match, req.reqId);
     log.info('sponsors.list', { reqId: req.reqId, formId: form.id, org, count: sponsors.length });
     res.json({ sponsors });
   } catch (err) {
@@ -433,9 +460,11 @@ app.post('/api/forms/:id/request', async (req, res) => {
   if (sponsorFields.length) {
     let validSet;
     try {
-      const orgs = await clientFor(conn).getOrganizations({ orgQuery: orgQuery || undefined, reqId: req.reqId });
+      const client = clientFor(conn);
+      const orgs = await client.getOrganizations({ orgQuery: orgQuery || undefined, reqId: req.reqId });
       const match = orgs.find((o) => String(o.organizationname || '') === organization);
-      validSet = new Set(sponsorUsernames(match).map((s) => s.toLowerCase()));
+      const valid = await validOrgSponsors(client, match, req.reqId);
+      validSet = new Set(valid.map((s) => s.username.toLowerCase()));
     } catch (err) {
       log.warn('form.sponsor_check_failed', { reqId: req.reqId, formId: form.id, error: err.message });
       return res.status(502).json({ error: `Could not verify sponsor: ${err.message}` });
