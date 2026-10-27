@@ -31,6 +31,14 @@ function applyForm() {
   $('intro').textContent = form.intro || '';
   $('success-msg').textContent = form.successMessage || 'Request submitted.';
   if (form.logoUrl) { $('logo').src = form.logoUrl; $('logo').classList.remove('hidden'); }
+  // Footer text is per-form; blank hides it, unset keeps the default.
+  const footerEl = $('footer');
+  if (footerEl) {
+    const ft = form.footer;
+    if (ft === undefined || ft === null) footerEl.textContent = 'Powered by Saviynt';
+    else if (String(ft).trim() === '') footerEl.style.display = 'none';
+    else footerEl.textContent = ft;
+  }
   const c = form.colors || {};
   const root = document.documentElement.style;
   const vars = { primary: '--primary', primaryText: '--primary-text', accent: '--accent', background: '--bg', surface: '--surface', text: '--text', muted: '--muted' };

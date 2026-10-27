@@ -113,6 +113,7 @@ async function openEditor(id) {
   $('e-intro').value = editing.intro || '';
   $('e-successMessage').value = editing.successMessage || '';
   $('e-logoUrl').value = editing.logoUrl || '';
+  $('e-footer').value = editing.footer ?? 'Powered by Saviynt';
   $('e-orgQuery').value = editing.orgQuery || '';
   $('e-orgField').value = editing.orgField || '';
   $('e-scopeManagerToOrg').value = String(editing.scopeManagerToOrg === true);
@@ -144,7 +145,7 @@ $('e-save').addEventListener('click', async () => {
     name: $('e-name').value.trim(), enabled: $('e-enabled').value === 'true',
     productName: $('e-productName').value.trim(), tagline: $('e-tagline').value.trim(),
     intro: $('e-intro').value, successMessage: $('e-successMessage').value,
-    logoUrl: $('e-logoUrl').value.trim(), colors, fields,
+    logoUrl: $('e-logoUrl').value.trim(), footer: $('e-footer').value.trim(), colors, fields,
     orgQuery: $('e-orgQuery').value.trim(), orgField: $('e-orgField').value.trim(),
     scopeManagerToOrg: $('e-scopeManagerToOrg').value === 'true', roles: $('e-roles').value.trim(),
     requestParams: $('e-requestParams').value,
