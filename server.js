@@ -128,11 +128,28 @@ function finalizeUserPayload(user, { form, orgField, conn, organization }) {
   return user;
 }
 
+// Usernames of the valid sponsors for an org: its primary contact plus any
+// organization owners. getOrganization returns primaryvendorcontact (a username
+// string) and organizationowners (an array); shapes vary, so be defensive.
+function sponsorUsernames(org) {
+  if (!org) return [];
+  const out = [];
+  const pc = org.primaryvendorcontact || org.primarycontact || org.primaryVendorContact;
+  if (pc) out.push(String(pc).trim());
+  const owners = org.organizationowners || org.organization_owners || org.owners || [];
+  for (const o of Array.isArray(owners) ? owners : []) {
+    if (!o) continue;
+    out.push(String(typeof o === 'string' ? o : (o.username || o.ownername || o.user || o.userName || '')).trim());
+  }
+  return [...new Set(out.filter(Boolean))];
+}
+
 // A representative sample value for a field, used only by the API-call preview.
 function sampleValue(field) {
   if (field.type === 'email') return 'jane.doe@example.com';
   if (field.type === 'tel') return '+1-555-0100';
   if (field.type === 'number') return '123';
+  if (field.type === 'orgSponsor') return '<sponsor username>';
   if (field.type === 'userLookup') return `<${(field.label || field.key).toLowerCase()} username>`;
   if (field.key === 'firstname') return 'Jane';
   if (field.key === 'lastname') return 'Doe';
@@ -355,10 +372,44 @@ app.get('/api/forms/:id/users', async (req, res) => {
   res.json({ users });
 });
 
+// Valid sponsors for an org (drives the orgSponsor dropdown): the org's primary
+// contact plus its owners, resolved to {username,name,email} via getUser.
+app.get('/api/forms/:id/sponsors', async (req, res) => {
+  const form = store.getForm(req.params.id);
+  if (!form || !form.enabled) return res.status(404).json({ error: 'Form not found.' });
+  const org = String(req.query.org || '').trim();
+  if (!org) return res.json({ sponsors: [] });
+  const { conn, orgQuery } = settingsFor(form);
+  try {
+    const client = clientFor(conn);
+    const orgs = await client.getOrganizations({ orgQuery: orgQuery || undefined, reqId: req.reqId });
+    const match = orgs.find((o) => String(o.organizationname || '') === org);
+    const sponsors = [];
+    const seen = new Set();
+    for (const un of sponsorUsernames(match)) {
+      const key = un.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      let resolved = { username: un, name: un, email: '' };
+      try {
+        const raw = await client.searchUsers({ username: un }, { max: 1, reqId: req.reqId });
+        const u = raw.map(normalizeUser).find((x) => x.username.toLowerCase() === key);
+        if (u) resolved = { username: u.username, name: u.name, email: u.email };
+      } catch { /* fall back to the bare username */ }
+      sponsors.push(resolved);
+    }
+    log.info('sponsors.list', { reqId: req.reqId, formId: form.id, org, count: sponsors.length });
+    res.json({ sponsors });
+  } catch (err) {
+    log.warn('sponsors.list_failed', { reqId: req.reqId, formId: form.id, org, error: err.message });
+    res.status(502).json({ error: err.message });
+  }
+});
+
 app.post('/api/forms/:id/request', async (req, res) => {
   const form = store.getForm(req.params.id);
   if (!form || !form.enabled) return res.status(404).json({ error: 'Form not found.' });
-  const { conn, orgField } = settingsFor(form);
+  const { conn, orgField, orgQuery } = settingsFor(form);
   const body = req.body || {};
 
   const organization = String(body.organization || '').trim();
@@ -366,12 +417,34 @@ app.post('/api/forms/:id/request', async (req, res) => {
 
   const user = {};
   const lookupFields = [];
+  const sponsorFields = [];
   for (const field of form.fields || []) {
     const value = String(body[field.key] ?? '').trim();
     if (field.required && !value) return res.status(400).json({ error: `${field.label} is required.` });
     if (value) {
       user[field.key] = value;
       if (field.type === 'userLookup') lookupFields.push(field);
+      if (field.type === 'orgSponsor') sponsorFields.push(field);
+    }
+  }
+
+  // Re-check sponsor picks against the org's valid sponsor list (the browser
+  // could submit anything). One getOrganization fetch covers all sponsor fields.
+  if (sponsorFields.length) {
+    let validSet;
+    try {
+      const orgs = await clientFor(conn).getOrganizations({ orgQuery: orgQuery || undefined, reqId: req.reqId });
+      const match = orgs.find((o) => String(o.organizationname || '') === organization);
+      validSet = new Set(sponsorUsernames(match).map((s) => s.toLowerCase()));
+    } catch (err) {
+      log.warn('form.sponsor_check_failed', { reqId: req.reqId, formId: form.id, error: err.message });
+      return res.status(502).json({ error: `Could not verify sponsor: ${err.message}` });
+    }
+    for (const field of sponsorFields) {
+      if (!validSet.has(user[field.key].toLowerCase())) {
+        log.warn('form.invalid_sponsor', { reqId: req.reqId, formId: form.id, field: field.key, value: user[field.key], organization });
+        return res.status(400).json({ error: `${field.label} "${user[field.key]}" is not a valid sponsor for ${organization}.` });
+      }
     }
   }
 

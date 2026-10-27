@@ -45,6 +45,10 @@ function applyForm() {
         `<div class="lookup"><input id="f-${esc(f.key)}" type="text" autocomplete="off" placeholder="Start typing a name…">` +
         `<div class="results" id="r-${esc(f.key)}"></div></div>`;
     }
+    if (f.type === 'orgSponsor') {
+      // Populated from the chosen org's valid sponsors when entering step 1.
+      return label + `<select id="f-${esc(f.key)}" data-key="${esc(f.key)}" disabled><option value="">Choose an organization first</option></select>`;
+    }
     return label + `<input id="f-${esc(f.key)}" type="${esc(f.type || 'text')}" data-key="${esc(f.key)}">`;
   }).join('');
 
@@ -104,6 +108,42 @@ async function loadOrgs() {
   $('org').disabled = false;
 }
 
+// Populate orgSponsor dropdowns from the chosen organization's valid sponsors.
+async function loadSponsors() {
+  const fields = (form.fields || []).filter((f) => f.type === 'orgSponsor');
+  for (const f of fields) {
+    const sel = $(`f-${f.key}`);
+    if (!sel) continue;
+    delete data[f.key]; delete displays[f.key];
+    sel.disabled = true;
+    sel.innerHTML = '<option value="">Loading…</option>';
+    try {
+      const res = await fetch(`/api/forms/${encodeURIComponent(FORM_ID)}/sponsors?org=${encodeURIComponent(data.organization || '')}`);
+      const body = await res.json();
+      const sponsors = (res.ok && body.sponsors) || [];
+      if (!sponsors.length) {
+        sel.innerHTML = '<option value="">No sponsor is set up for this organization</option>';
+        sel.disabled = true;
+        continue;
+      }
+      const labelOf = (s) => (s.email ? `${s.name} (${s.email})` : s.name);
+      sel.innerHTML = '<option value="">Select…</option>' +
+        sponsors.map((s) => `<option value="${esc(s.username)}" data-label="${esc(labelOf(s))}">${esc(labelOf(s))}</option>`).join('');
+      sel.disabled = false;
+      sel.onchange = () => {
+        data[f.key] = sel.value;
+        const opt = sel.selectedOptions[0];
+        displays[f.key] = opt ? (opt.dataset.label || opt.textContent) : '';
+        if (!sel.value) { delete data[f.key]; delete displays[f.key]; }
+      };
+      if (sponsors.length === 1) { sel.value = sponsors[0].username; sel.onchange(); }
+    } catch (err) {
+      sel.innerHTML = '<option value="">Could not load sponsors</option>';
+      sel.disabled = true;
+    }
+  }
+}
+
 function reviewList() {
   const rows = [['Organization', data.organization]];
   for (const f of form.fields || []) {
@@ -116,6 +156,13 @@ function validateFields() {
     if (f.type === 'userLookup') {
       // Value comes from a picked result, not the raw text.
       if (f.required && !data[f.key]) { banner(`Please choose a ${f.label.toLowerCase()} from the list.`, 'error'); return false; }
+      continue;
+    }
+    if (f.type === 'orgSponsor') {
+      const sel = $(`f-${f.key}`);
+      const v = sel ? sel.value : '';
+      if (v) data[f.key] = v; else delete data[f.key];
+      if (f.required && !v) { banner(`Please choose a ${f.label.toLowerCase()}.`, 'error'); return false; }
       continue;
     }
     const val = $(`f-${f.key}`).value.trim();
@@ -131,7 +178,7 @@ $('org').addEventListener('change', () => {
   $('to-1').disabled = !o;
   if (o) data.organization = o.name;
 });
-$('to-1').addEventListener('click', () => showStep(1));
+$('to-1').addEventListener('click', () => { showStep(1); loadSponsors(); });
 $('back-0').addEventListener('click', () => showStep(0));
 $('to-2').addEventListener('click', () => { if (validateFields()) { reviewList(); showStep(2); } });
 $('back-1').addEventListener('click', () => showStep(1));
@@ -139,7 +186,7 @@ $('again').addEventListener('click', () => {
   Object.keys(data).forEach((k) => delete data[k]);
   Object.keys(displays).forEach((k) => delete displays[k]);
   $('org').value = ''; $('org-detail').textContent = ''; $('to-1').disabled = true;
-  document.querySelectorAll('#fields input').forEach((i) => (i.value = ''));
+  document.querySelectorAll('#fields input, #fields select').forEach((i) => { i.value = ''; });
   showStep(0);
 });
 $('submit').addEventListener('click', async () => {

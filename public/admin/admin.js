@@ -93,7 +93,7 @@ function fieldRow(f = {}) {
   div.innerHTML = `
     <input class="fk" placeholder="firstname" value="${esc(f.key || '')}">
     <input class="fl" placeholder="First name" value="${esc(f.label || '')}">
-    <select class="ft">${['text', 'email', 'tel', 'number', 'userLookup'].map((t) => `<option ${f.type === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
+    <select class="ft">${['text', 'email', 'tel', 'number', 'userLookup', 'orgSponsor'].map((t) => `<option ${f.type === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
     <select class="fr"><option value="true" ${f.required ? 'selected' : ''}>Yes</option><option value="false" ${!f.required ? 'selected' : ''}>No</option></select>
     <input class="fh" placeholder="help text" value="${esc(f.help || '')}">
     <button class="small danger" title="Remove">✕</button>`;
